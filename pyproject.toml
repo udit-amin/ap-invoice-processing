@@ -1,0 +1,10 @@
+[tool.pytest.ini_options]
+# Put the repo root on sys.path so `import src...` works regardless of how
+# pytest is launched (console script or `python -m pytest`).
+pythonpath = ["."]
+testpaths = ["tests"]
+# Silence harmless SWIG DeprecationWarnings emitted by PyMuPDF (fitz) at import
+# time on Python 3.13. Third-party, not from our code.
+filterwarnings = [
+    "ignore:builtin type .* has no __module__ attribute:DeprecationWarning",
+]

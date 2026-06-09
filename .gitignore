@@ -17,3 +17,6 @@ venv/
 
 # Generated data (PDFs are regenerated from src/generate/)
 data/inputs/*.pdf
+
+# Stray SQLite artifacts — the pipeline uses Postgres; *.db should never be committed
+*.db
