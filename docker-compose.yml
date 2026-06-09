@@ -1,0 +1,27 @@
+# Local Postgres for the AP invoice pipeline.
+#
+#   docker compose up -d
+#   python -m src.db.seed        # apply schema + seed reference data
+#
+# The DSN matches config.get_database_url()'s default; override with
+# DATABASE_URL in the environment or .env to point elsewhere.
+services:
+  db:
+    image: postgres:16
+    container_name: ap_invoices_db
+    environment:
+      POSTGRES_USER: ap
+      POSTGRES_PASSWORD: ap
+      POSTGRES_DB: ap_invoices
+    ports:
+      - "5432:5432"
+    volumes:
+      - ap_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ap -d ap_invoices"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+volumes:
+  ap_pgdata:

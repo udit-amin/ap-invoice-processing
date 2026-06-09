@@ -21,10 +21,22 @@ from reportlab.platypus import (
 )
 
 from src import config
-from src.db.seed import VENDORS
 
-# Vendor name → (tax_id, terms) for invoice headers.
-_VENDOR_META = {name: (tax_id, terms) for (_id, name, _ap, _cat, tax_id, terms) in VENDORS}
+# Vendor name → (tax_id, terms) for invoice headers. Self-contained (the v0
+# vendor set is independent of the v2 Postgres seed). Unknown vendors fall back
+# to a default in _build_story().
+_VENDOR_META = {
+    "Dell Technologies":     ("29AAAAA0001A1Z5", "Net-30"),
+    "Logitech India":        ("29AAAAA0002A1Z4", "Net-30"),
+    "CloudHost Solutions":   ("27AAAAA0003A1Z3", "Net-15"),
+    "Acme Office Supplies":  ("06AAAAA0004A1Z2", "Net-30"),
+    "FastFreight Logistics": ("24AAAAA0005A1Z1", "Net-45"),
+    "Surya Stationers":      ("33AAAAA0006A1Z0", "Net-15"),
+    "BlueOak Furniture":     ("29AAAAA0007A1Z9", "Net-30"),
+    "Nimbus Software Labs":  ("36AAAAA0008A1Z8", "Net-30"),
+    "Quanta Networks":       ("29AAAAA0009A1Z7", "Net-30"),
+    "GreenLeaf Catering":    ("29AAAAA0010A1Z6", "Net-15"),
+}
 
 
 def inr(n: float) -> str:

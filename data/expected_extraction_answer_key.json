@@ -1,0 +1,242 @@
+{
+  "normal_1_dell.pdf": {
+    "source_type": "text",
+    "invoice_number": "DEL/2026/0412",
+    "invoice_date": "2026-05-28",
+    "vendor_name": "Dell Technologies India Pvt Ltd",
+    "po_reference": "PO-5001",
+    "line_items": [
+      {
+        "description": "Latitude 5440 Laptop",
+        "qty": 5,
+        "unit_price": 72000,
+        "amount": 360000
+      },
+      {
+        "description": "UltraSharp 24\" Monitor",
+        "qty": 5,
+        "unit_price": 24000,
+        "amount": 120000
+      }
+    ],
+    "subtotal": 480000,
+    "tax_mode": "separate",
+    "tax_amount": 86400,
+    "total": 566400,
+    "currency": "INR",
+    "expect_high_confidence": true
+  },
+  "normal_2_stellar.pdf": {
+    "source_type": "text",
+    "invoice_number": "SSS-2026-1187",
+    "invoice_date": "2026-06-01",
+    "vendor_name": "Stellar Software Solutions",
+    "po_reference": "PO-5005",
+    "line_items": [
+      {
+        "description": "Analytics Suite annual license",
+        "qty": 20,
+        "unit_price": 9500,
+        "amount": 190000
+      },
+      {
+        "description": "Onboarding & setup",
+        "qty": 1,
+        "unit_price": 35000,
+        "amount": 35000
+      }
+    ],
+    "subtotal": 225000,
+    "tax_mode": "separate",
+    "tax_amount": 40500,
+    "total": 265500,
+    "currency": "INR",
+    "expect_high_confidence": true
+  },
+  "normal_3_fastfreight.pdf": {
+    "source_type": "text",
+    "invoice_number": "FF/INV/8841",
+    "invoice_date": "2026-05-30",
+    "vendor_name": "FastFreight Logistics",
+    "po_reference": "PO-5004",
+    "line_items": [
+      {
+        "description": "Full-truck freight (BLR-PNQ)",
+        "qty": 1,
+        "unit_price": 48000,
+        "amount": 48000
+      },
+      {
+        "description": "Handling & insurance",
+        "qty": 1,
+        "unit_price": 6000,
+        "amount": 6000
+      }
+    ],
+    "subtotal": 54000,
+    "tax_mode": "separate",
+    "tax_amount": 9720,
+    "total": 63720,
+    "currency": "INR",
+    "expect_high_confidence": true
+  },
+  "normal_4_apex.pdf": {
+    "source_type": "text",
+    "invoice_number": "APX-2026-0098",
+    "invoice_date": "2026-06-03",
+    "vendor_name": "Apex Consulting Group",
+    "po_reference": "PO-5007",
+    "line_items": [
+      {
+        "description": "Senior consultant (hours)",
+        "qty": 60,
+        "unit_price": 4500,
+        "amount": 270000
+      },
+      {
+        "description": "Project manager (hours)",
+        "qty": 20,
+        "unit_price": 6000,
+        "amount": 120000
+      }
+    ],
+    "subtotal": 390000,
+    "tax_mode": "separate",
+    "tax_amount": 70200,
+    "total": 460200,
+    "currency": "INR",
+    "expect_high_confidence": true
+  },
+  "normal_5_nimbus.pdf": {
+    "source_type": "text",
+    "invoice_number": "NN-2026-05-2231",
+    "invoice_date": "2026-05-31",
+    "vendor_name": "Nimbus Networks",
+    "po_reference": "PO-5008",
+    "line_items": [
+      {
+        "description": "Leased line 100 Mbps - May 2026",
+        "qty": 1,
+        "unit_price": 85000,
+        "amount": 85000
+      },
+      {
+        "description": "Static IP block",
+        "qty": 1,
+        "unit_price": 5000,
+        "amount": 5000
+      }
+    ],
+    "subtotal": 90000,
+    "tax_mode": "separate",
+    "tax_amount": 16200,
+    "total": 106200,
+    "currency": "INR",
+    "expect_high_confidence": true
+  },
+  "edge_1_greenleaf_scanned.pdf": {
+    "source_type": "scanned_image",
+    "invoice_number": "GL-2026-337",
+    "invoice_date": "2026-05-27",
+    "vendor_name": "GreenLeaf Facilities Management",
+    "po_reference": "PO-5006",
+    "line_items": [
+      {
+        "description": "Monthly Housekeeping - May",
+        "qty": 1,
+        "unit_price": 65000,
+        "amount": 65000
+      },
+      {
+        "description": "Deep Cleaning (one-time)",
+        "qty": 1,
+        "unit_price": 18000,
+        "amount": 18000
+      }
+    ],
+    "subtotal": 83000,
+    "tax_mode": "separate",
+    "tax_amount": 14940,
+    "total": 97940,
+    "currency": "INR",
+    "expect_high_confidence": false,
+    "note": "No text layer. Extractor must detect this and route through OCR / vision. Confidence should be lower than text PDFs; OCR may garble a digit or the invoice number."
+  },
+  "edge_2_techgear_bundled.pdf": {
+    "source_type": "text",
+    "invoice_number": "TG/2026/5567",
+    "invoice_date": "2026-06-02",
+    "vendor_name": "TechGear Distributors",
+    "po_reference": "PO-5009",
+    "line_items": [
+      {
+        "description": "Productivity Bundle (Laptop + Wireless Headphones)",
+        "qty": 10,
+        "unit_price": 68000,
+        "amount": 680000
+      }
+    ],
+    "subtotal": 680000,
+    "tax_mode": "separate",
+    "tax_amount": 122400,
+    "total": 802400,
+    "currency": "INR",
+    "expect_high_confidence": true,
+    "is_bundled": true,
+    "note": "Invoice presents ONE bundled line. PO-5009 expects TWO itemised lines (laptop @65,000 x10, headphones @3,000 x10 => same 680,000 subtotal). Extractor should flag bundled=true so the downstream matcher knows line-level reconciliation is not possible against this invoice."
+  },
+  "edge_3_blueprint_embedded_tax.pdf": {
+    "source_type": "text",
+    "invoice_number": "BPM-2026-219",
+    "invoice_date": "2026-06-04",
+    "vendor_name": "BluePrint Marketing",
+    "po_reference": "PO-5010",
+    "line_items": [
+      {
+        "description": "Social media campaign (Q2)",
+        "qty": 1,
+        "unit_price_incl_tax": 236000
+      },
+      {
+        "description": "Creative design retainer",
+        "qty": 1,
+        "unit_price_incl_tax": 118000
+      }
+    ],
+    "tax_mode": "embedded",
+    "subtotal_ex_tax": 300000,
+    "tax_amount": 54000,
+    "total": 354000,
+    "currency": "INR",
+    "expect_high_confidence": true,
+    "note": "Prices are GST-inclusive with NO separate tax line. Extractor must detect tax_mode=embedded and back out subtotal (354000 / 1.18 = 300000) and tax (54000). A naive extractor will report subtotal=354000 and tax=0, which would break tolerance matching downstream."
+  },
+  "edge_4_dell_line_mismatch.pdf": {
+    "source_type": "text",
+    "invoice_number": "DEL/2026/0419",
+    "invoice_date": "2026-05-29",
+    "vendor_name": "Dell Technologies India Pvt Ltd",
+    "po_reference": "PO-5001",
+    "line_items": [
+      {
+        "description": "Latitude 5440 Laptop",
+        "qty": 7,
+        "unit_price": 60000,
+        "amount": 420000
+      },
+      {
+        "description": "UltraSharp 24\" Monitor",
+        "qty": 3,
+        "unit_price": 20000,
+        "amount": 60000
+      }
+    ],
+    "subtotal": 480000,
+    "tax_mode": "separate",
+    "tax_amount": 86400,
+    "total": 566400,
+    "currency": "INR",
+    "expect_high_confidence": true,
+    "note": "EXTRACTION-clean: faithfully report these lines with high confidence. This is a VALIDATION-stage test, not an extraction one. Total (566400) matches PO-5001 exactly, so total-tolerance passes; but lines differ from the ordered 5x@72000 + 5x@24000, so line reconciliation must FAIL. This is the case that proves line reconciliation catches what total-matching misses."
+  }
+}
