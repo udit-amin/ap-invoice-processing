@@ -1,58 +1,109 @@
--- v0 schema for the AP invoice processor.
--- Only the tables the extraction module needs to be exercised and to leave
--- clean seams for later versions (matching, validation, decisioning, audit).
--- Governance lives in data (policy_config / per-PO tolerance), never in code.
+-- Postgres schema for the AP invoice processor (v2).
+--
+-- Single source of truth for reference data, processed invoices, validation
+-- reports, and the append-only governance audit trail.  Governance lives in
+-- data (policy_config / per-PO tolerance), never in code.
+--
+-- Idempotent: safe to run repeatedly (CREATE TABLE IF NOT EXISTS).  Use
+-- src/db/seed.py to (re)load reference data.
 
-PRAGMA foreign_keys = ON;
-
-DROP TABLE IF EXISTS run_log;
-DROP TABLE IF EXISTS purchase_orders;
-DROP TABLE IF EXISTS vendors;
-DROP TABLE IF EXISTS policy_config;
-
--- Vendor registry (handover §6.1).
-CREATE TABLE vendors (
-    vendor_id    TEXT PRIMARY KEY,         -- e.g. V-01
+-- --------------------------------------------------------------------------
+-- Reference data (seeded)
+-- --------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS vendors (
+    vendor_id    TEXT PRIMARY KEY,            -- e.g. V-001
     vendor_name  TEXT NOT NULL UNIQUE,
-    approved     INTEGER NOT NULL,         -- 0/1; V-10 is intentionally unapproved
+    approved     BOOLEAN NOT NULL,            -- V-010 is intentionally unapproved
     category     TEXT NOT NULL,
-    tax_id       TEXT NOT NULL,            -- GSTIN-style
-    terms        TEXT NOT NULL             -- e.g. Net-30
+    tax_id       TEXT,                        -- GSTIN-style
+    terms        TEXT                         -- e.g. Net-30
 );
 
--- Purchase orders (handover §6.2). Amounts are INR, pre-tax.
--- tolerance_pct is per-PO so governance lives in data, not code.
-CREATE TABLE purchase_orders (
-    po_id              TEXT PRIMARY KEY,    -- e.g. PO-4421
+CREATE TABLE IF NOT EXISTS purchase_orders (
+    po_id              TEXT PRIMARY KEY,       -- e.g. PO-5001
+    vendor_id          TEXT REFERENCES vendors (vendor_id),
     vendor_name        TEXT NOT NULL,
-    description        TEXT NOT NULL,
-    approved_amount    REAL NOT NULL,
-    remaining_balance  REAL NOT NULL,
-    status             TEXT NOT NULL,       -- open | closed
-    tolerance_pct      REAL NOT NULL,
-    FOREIGN KEY (vendor_name) REFERENCES vendors (vendor_name)
+    description        TEXT,
+    approved_amount    NUMERIC(14, 2) NOT NULL,
+    remaining_balance  NUMERIC(14, 2) NOT NULL,
+    status             TEXT NOT NULL,          -- open | closed | cancelled
+    tolerance_pct      NUMERIC(5, 2) NOT NULL  -- per-PO; governance in data
 );
 
--- Single-row policy. Tolerance default + auto-approve ceiling + confidence
--- threshold are stored here so later versions read them, never hardcode.
-CREATE TABLE policy_config (
+-- Expected line items, normalised out of the old expected_line_items array.
+CREATE TABLE IF NOT EXISTS po_line_items (
+    id           BIGSERIAL PRIMARY KEY,
+    po_id        TEXT NOT NULL REFERENCES purchase_orders (po_id) ON DELETE CASCADE,
+    line_no      INTEGER NOT NULL,
+    description  TEXT NOT NULL,
+    quantity     NUMERIC(14, 3),
+    unit_price   NUMERIC(14, 2)
+);
+CREATE INDEX IF NOT EXISTS idx_po_line_items_po ON po_line_items (po_id);
+
+-- Single-row governance policy.
+CREATE TABLE IF NOT EXISTS policy_config (
     id                    INTEGER PRIMARY KEY CHECK (id = 1),
-    auto_approve_ceiling  REAL NOT NULL,    -- INR, pre-tax
-    default_tolerance_pct REAL NOT NULL,
-    confidence_threshold  REAL NOT NULL
+    auto_approve_ceiling  NUMERIC(14, 2) NOT NULL,   -- INR, pre-tax
+    default_tolerance_pct NUMERIC(5, 2)  NOT NULL,
+    confidence_threshold  NUMERIC(4, 3)  NOT NULL
 );
 
--- Append-only run log. Created empty in v0; the extractor leaves the seam but
--- does not yet write here (matching/decisioning fill the later columns).
-CREATE TABLE run_log (
-    run_id          INTEGER PRIMARY KEY AUTOINCREMENT,
-    created_at      TEXT NOT NULL DEFAULT (datetime('now')),
+-- --------------------------------------------------------------------------
+-- Operational data
+-- --------------------------------------------------------------------------
+
+-- One row per end-to-end pipeline execution. Reprocessing creates a new row.
+CREATE TABLE IF NOT EXISTS pipeline_runs (
+    run_id          UUID PRIMARY KEY,
+    invoice_number  TEXT,
+    vendor_name     TEXT,
+    po_reference    TEXT,
+    source_type     TEXT,                       -- text | scanned
     invoice_path    TEXT,
-    source_type     TEXT,                   -- text | scanned
-    extracted_json  TEXT,                   -- full §5.3 payload
-    overall_conf    REAL,
-    -- seams for later versions (left null/unused in v0):
-    matched_po      TEXT,
-    decision        TEXT,                   -- approve | review | reject
-    notes           TEXT
+    overall_conf    NUMERIC(4, 3),
+    started_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
+    finished_at     TIMESTAMPTZ
 );
+
+-- Duplicate-detection ledger. The UNIQUE constraint makes dedup race-proof:
+-- the second concurrent insert of the same invoice loses the conflict.
+CREATE TABLE IF NOT EXISTS invoices (
+    invoice_id      BIGSERIAL PRIMARY KEY,
+    invoice_number  TEXT NOT NULL,
+    vendor_name     TEXT NOT NULL DEFAULT '',
+    first_run_id    UUID REFERENCES pipeline_runs (run_id),
+    first_seen_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
+    UNIQUE (invoice_number, vendor_name)
+);
+
+-- Full validation report (evidence only — never a verdict) as JSONB.
+CREATE TABLE IF NOT EXISTS validation_reports (
+    id              BIGSERIAL PRIMARY KEY,
+    run_id          UUID REFERENCES pipeline_runs (run_id),
+    invoice_number  TEXT,
+    report          JSONB NOT NULL,
+    passed          INTEGER,
+    failed          INTEGER,
+    skipped         INTEGER,
+    created_at      TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_validation_reports_run ON validation_reports (run_id);
+CREATE INDEX IF NOT EXISTS idx_validation_reports_invoice ON validation_reports (invoice_number);
+
+-- --------------------------------------------------------------------------
+-- Governance audit trail (append-only)
+-- --------------------------------------------------------------------------
+-- One or more events per pipeline stage: ingest -> extract -> match ->
+-- validate -> (decision). Never updated or deleted.
+CREATE TABLE IF NOT EXISTS governance_events (
+    event_id    BIGSERIAL PRIMARY KEY,
+    run_id      UUID REFERENCES pipeline_runs (run_id),
+    stage       TEXT NOT NULL,                  -- ingest|extract|match|validate|decision
+    status      TEXT NOT NULL,                  -- ok|fail|skip|warn|error
+    detail      JSONB,
+    actor       TEXT NOT NULL DEFAULT 'system',
+    created_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_governance_events_run ON governance_events (run_id);
+CREATE INDEX IF NOT EXISTS idx_governance_events_stage ON governance_events (stage);

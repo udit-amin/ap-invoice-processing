@@ -8,3 +8,5 @@ uvicorn[standard]>=0.30.0
 python-multipart>=0.0.9
 pytest>=8.0.0
 httpx2>=0.28.0
+rapidfuzz>=3.0.0
+psycopg[binary,pool]>=3.1

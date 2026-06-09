@@ -15,6 +15,5 @@ venv/
 # Editor / tooling
 .claude/
 
-# Generated data
-data/invoices.db
+# Generated data (PDFs are regenerated from src/generate/)
 data/inputs/*.pdf
