@@ -151,7 +151,7 @@ TOKEN=$(curl -s -X POST localhost:8000/auth/login \
   -d '{"email":"priya@acmecorp.com","password":"demo-clerk-1"}' \
   | python3 -c "import sys,json;print(json.load(sys.stdin)['access_token'])")
 
-curl -s -X POST localhost:8000/process -H "Authorization: Bearer $TOKEN" \
+curl -s -X POST localhost:8000/invoices/process -H "Authorization: Bearer $TOKEN" \
   -F file=@data/inputs/normal_1_dell.pdf \
   | python3 -c "import sys,json; d=json.load(sys.stdin)['decision']; print(d['verdict'], d['po_balance_after'])"
 # → APPROVE 0.0
@@ -200,7 +200,7 @@ curl -s -X POST http://localhost:8000/extract -H "Authorization: Bearer $TOKEN" 
   -F "file=@data/inputs/normal_1_dell.pdf" | python3 -m json.tool
 
 # Full pipeline: extraction + validation evidence + governance run
-curl -s -X POST http://localhost:8000/process -H "Authorization: Bearer $TOKEN" \
+curl -s -X POST http://localhost:8000/invoices/process -H "Authorization: Bearer $TOKEN" \
   -F "file=@data/inputs/edge_4_dell_line_mismatch.pdf" | python3 -m json.tool
 
 # Audit trail requires a manager token (clerk token here → 403)
@@ -214,29 +214,100 @@ curl -s http://localhost:8000/audit/DEL%2F2026%2F0419 -H "Authorization: Bearer 
   | python3 -m json.tool
 ```
 
-> `/extract` and `/process` call the live model, so they need
+> `/extract` and `/invoices/process` call the live model, so they need
 > `ANTHROPIC_API_KEY`. Without a key they return a structured `error` payload
 > (HTTP 200) rather than crashing.
 >
-> All three routes require a bearer token: `/extract` and `/process` are
+> All routes require a bearer token: `/extract` and `/invoices/process` are
 > **clerk**-only, `/audit/{invoice_number}` is **manager**-only. A missing or
 > invalid token → **401**; the wrong role → **403**. See
 > [README "Authentication & roles"](../README.md#authentication--roles) for the
-> full demo-user list.
+> full demo-user list and **[API.md](API.md)** for every endpoint.
 
 What to verify:
 
-- `/process` returns `{run_id, extraction, validation, decision}`. For
+- `/invoices/process` returns `{run_id, extraction, validation, decision}`. For
   `edge_4_dell_line_mismatch`, `validation` shows `total_tolerance: pass` and
   `line_reconciliation: fail`, and `decision.verdict` is **FLAG** with
   `review_payload.queue == "line_variance"`.
 - `/audit/{invoice_number}` returns the ordered event trail
   (`ingest → extract → match → match → validate ×4 → decision`) plus the latest
-  validation report and `latest_verdict`. A never-seen invoice → **404**.
+  validation report and `latest_verdict`, with `actor_user_id`/`actor_role`/
+  `action_type` on the events. A never-seen invoice → **404**.
 
 ---
 
-## 7. Expected outcomes at a glance
+## 7. Review, dashboard, and policy (PR2)
+
+With the server running, exercise the human-in-the-loop surface. Start from a
+clean operational state so the queue is predictable:
+
+```bash
+python -m app.db.seed     # reseed PO balances + policy
+docker exec ap_invoices_db psql -U ap -d ap_invoices \
+  -c "TRUNCATE review_actions, governance_events, validation_reports, verdicts, invoices, pipeline_runs RESTART IDENTITY CASCADE;"
+
+CLERK=$(curl -s -X POST localhost:8000/auth/login -H 'Content-Type: application/json' \
+  -d '{"email":"priya@acmecorp.com","password":"demo-clerk-1"}' \
+  | python3 -c "import sys,json;print(json.load(sys.stdin)['access_token'])")
+MGR=$(curl -s -X POST localhost:8000/auth/login -H 'Content-Type: application/json' \
+  -d '{"email":"anjali@acmecorp.com","password":"demo-mgr-1"}' \
+  | python3 -c "import sys,json;print(json.load(sys.stdin)['access_token'])")
+```
+
+**Clerk processes an over-ceiling invoice → FLAG, then sees only their own runs:**
+
+```bash
+RUN=$(curl -s -X POST localhost:8000/invoices/process -H "Authorization: Bearer $CLERK" \
+  -F file=@data/inputs/edge_2_techgear_bundled.pdf \
+  | python3 -c "import sys,json;d=json.load(sys.stdin);print(d['run_id'])")
+
+curl -s "localhost:8000/invoices/runs?verdict=FLAG" -H "Authorization: Bearer $CLERK" | python3 -m json.tool
+```
+
+**Manager reviews the queue and approves it (effectful — the PO is drawn down):**
+
+```bash
+curl -s localhost:8000/review/queue -H "Authorization: Bearer $MGR" | python3 -m json.tool
+
+curl -s -X POST "localhost:8000/review/$RUN/action" -H "Authorization: Bearer $MGR" \
+  -H 'Content-Type: application/json' \
+  -d '{"action":"approve","note":"confirmed bundle pricing"}' | python3 -m json.tool
+# → po_balance_after: 0.0 ; the run leaves the queue
+```
+
+**Dashboard + 403:**
+
+```bash
+curl -s localhost:8000/dashboard/summary -H "Authorization: Bearer $MGR" | python3 -m json.tool
+curl -s -o /dev/null -w "clerk on dashboard → %{http_code}\n" \
+  localhost:8000/dashboard/summary -H "Authorization: Bearer $CLERK"   # → 403
+```
+
+**Policy as data (AC#5) via the API** — lower the ceiling, then a previously-
+APPROVE invoice FLAGs on the next run, no redeploy:
+
+```bash
+curl -s localhost:8000/policy -H "Authorization: Bearer $MGR" | python3 -m json.tool
+curl -s -X PUT localhost:8000/policy -H "Authorization: Bearer $MGR" \
+  -H 'Content-Type: application/json' -d '{"auto_approve_ceiling":200000}' | python3 -m json.tool
+# policy_version bumps; a 'policy_change' governance event records the manager.
+# Restore: PUT {"auto_approve_ceiling":750000}
+```
+
+What to verify:
+
+- The flagged run appears in `/review/queue`; after `approve`, `po_balance_after`
+  is `0.0`, PO-5009 is `closed`, and the run leaves the queue.
+- `approve` on an emptied PO → **409**, the run stays flagged (no over-commit).
+- `reject`/`escalate` change no balance; `escalate` keeps the item in the queue.
+- `/dashboard/*` and `/policy` are **403** for a clerk.
+- After `PUT /policy` lowering the ceiling, re-processing a fresh normal invoice
+  FLAGs with `review_payload.queue == "over_authority"`.
+
+---
+
+## 8. Expected outcomes at a glance
 
 | What you did | Expected result |
 |--------------|-----------------|
@@ -248,12 +319,15 @@ What to verify:
 | `validate_all.py --dry-run` | verdicts: 6 APPROVE, 3 FLAG, 2 REJECT |
 | `validate_all.py --dry-run --keep` (2nd run) | every verdict → REJECT (duplicate) |
 | lower `auto_approve_ceiling` to 200000 | normals flip APPROVE → FLAG |
-| live `/process` of normal_1 | APPROVE, PO-5001 balance → 0 / closed |
+| live `/invoices/process` of normal_1 | APPROVE, PO-5001 balance → 0 / closed |
+| manager `approve` of a flagged run | PO drawn down; run leaves `/review/queue` |
+| `approve` of a flagged run on an emptied PO | HTTP 409, stays flagged |
+| `/dashboard/*` or `/policy` as a clerk | HTTP 403 |
 | `GET /audit/{unknown}` | HTTP 404 |
 
 ---
 
-## 8. Teardown
+## 9. Teardown
 
 ```bash
 docker compose down          # stop Postgres, keep the data volume
