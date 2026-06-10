@@ -238,5 +238,49 @@
     "currency": "INR",
     "expect_high_confidence": true,
     "note": "EXTRACTION-clean: faithfully report these lines with high confidence. This is a VALIDATION-stage test, not an extraction one. Total (566400) matches PO-5001 exactly, so total-tolerance passes; but lines differ from the ordered 5x@72000 + 5x@24000, so line reconciliation must FAIL. This is the case that proves line reconciliation catches what total-matching misses."
+  },
+  "edge_5_globex_unapproved.pdf": {
+    "source_type": "text",
+    "invoice_number": "GLBX-2026-001",
+    "invoice_date": "2026-06-05",
+    "vendor_name": "Globex Trading Co",
+    "po_reference": "PO-9999",
+    "line_items": [
+      {
+        "description": "Consulting services (unspecified)",
+        "qty": 1,
+        "unit_price": 200000,
+        "amount": 200000
+      }
+    ],
+    "subtotal": 200000,
+    "tax_mode": "separate",
+    "tax_amount": 36000,
+    "total": 236000,
+    "currency": "INR",
+    "expect_high_confidence": true,
+    "note": "DECISION-stage REJECT: unapproved/unrecognised vendor citing a non-existent PO-9999. po_lookup fails (short-circuits status/tolerance/line to skip) and vendor_approved fails — two REJECT drivers (fraud-flavoured)."
+  },
+  "edge_6_cloudhost_closed_po.pdf": {
+    "source_type": "text",
+    "invoice_number": "CH-2026-0455",
+    "invoice_date": "2026-06-05",
+    "vendor_name": "CloudHost Services India",
+    "po_reference": "PO-5003",
+    "line_items": [
+      {
+        "description": "Annual hosting renewal",
+        "qty": 1,
+        "unit_price": 120000,
+        "amount": 120000
+      }
+    ],
+    "subtotal": 120000,
+    "tax_mode": "separate",
+    "tax_amount": 21600,
+    "total": 141600,
+    "currency": "INR",
+    "expect_high_confidence": true,
+    "note": "DECISION-stage REJECT: approved vendor (V-011) billing the closed PO-5003. po_status fails — a clean single REJECT driver, even though the lines would otherwise be irrelevant."
   }
 }

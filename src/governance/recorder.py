@@ -219,8 +219,33 @@ def fetch_audit_trail(invoice_number: str) -> dict[str, Any]:
         row = cur.fetchone()
         latest_report = row[0] if row else None
 
+        cur.execute(
+            """SELECT verdict, reason, drivers, requires_human_review,
+                      review_payload, confidence_overall, policy_version,
+                      auto_approve_ceiling_applied, po_balance_after, decided_at
+               FROM verdicts
+               WHERE invoice_number = %s
+               ORDER BY decided_at DESC
+               LIMIT 1""",
+            (invoice_number,),
+        )
+        v = cur.fetchone()
+
+    latest_verdict = None
+    if v:
+        latest_verdict = {
+            "verdict": v[0], "reason": v[1], "drivers": v[2],
+            "requires_human_review": v[3], "review_payload": v[4],
+            "confidence_overall": float(v[5]) if v[5] is not None else None,
+            "policy_version": v[6],
+            "auto_approve_ceiling_applied": float(v[7]) if v[7] is not None else None,
+            "po_balance_after": float(v[8]) if v[8] is not None else None,
+            "decided_at": v[9].isoformat() if v[9] else None,
+        }
+
     return {
         "invoice_number": invoice_number,
         "runs": runs,
         "latest_report": latest_report,
+        "latest_verdict": latest_verdict,
     }

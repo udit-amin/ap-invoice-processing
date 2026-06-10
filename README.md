@@ -1,33 +1,37 @@
 # AP Invoice Processing
 
 An auditable accounts-payable pipeline: a supplier invoice PDF goes in, and out
-comes structured extraction data **plus** per-check validation evidence, with an
-append-only governance trail recording every step. It handles machine-readable
-and image-only (scanned) PDFs, itemised and bundled lines, separated and
-embedded tax, fuzzy vendor/line matching, and race-proof duplicate detection.
+comes structured extraction data, per-check validation evidence, **and a
+reasoned verdict** (`APPROVE | FLAG | REJECT`) — with an append-only governance
+trail recording every step. It handles machine-readable and image-only (scanned)
+PDFs, itemised and bundled lines, separated and embedded tax, fuzzy vendor/line
+matching, race-proof duplicate detection, and a race-safe PO balance update on
+approval.
 
-The pipeline has three stages:
+The pipeline has four stages:
 
 ```
-                 ┌─ extract ──┐   ┌─ match ──┐   ┌─ validate ─┐
-   PDF ─ ingest ─┤  Claude →  │ → │ PO +     │ → │ 6 checks → │ → evidence report
-                 │  JSON      │   │ vendor   │   │ pass/fail/ │    (no verdict)
-                 └────────────┘   └──────────┘   │   skip     │
-                                                  └────────────┘
+            ┌─ extract ─┐  ┌─ match ─┐  ┌─ validate ─┐  ┌─ decide ──┐
+ PDF ─ingest┤ Claude →  │→ │ PO +    │→ │ 6 checks → │→ │ policy →   │→ verdict
+            │ JSON      │  │ vendor  │  │ evidence   │  │ APPROVE/   │  + reason
+            └───────────┘  └─────────┘  │(no verdict)│  │ FLAG/REJECT│
+                                        └────────────┘  └───────────┘
         every stage emits an append-only governance event (Postgres)
 ```
 
-**Separation of concerns:** this system *gathers evidence*; it does not decide
-approve/reject. Each validation check answers one factual question. A later
-decision engine reads the evidence plus governance thresholds and renders the
-verdict — that is the only place a verdict is ever written.
+**Separation of concerns:** validation *gathers facts*; the decision engine
+*applies policy* to those facts. The validator never mentions a verdict; the
+engine never re-derives facts — it reads the evidence, the extraction
+confidence, and `policy_config`, and is the **only** place a verdict is written.
+The decision path is deterministic and LLM-free, so verdicts are auditable and
+reproducible.
 
 ## What's here
 
 ```
 src/
   config.py               Model string, thresholds, DB DSN, paths
-  pipeline.py             ingest → extract → match → validate orchestrator
+  pipeline.py             ingest → extract → match → validate → decide orchestrator
   db/
     schema.sql            Postgres table definitions
     connection.py         psycopg connection pool + schema apply
@@ -44,12 +48,17 @@ src/
     matcher.py            Fuzzy vendor / line-item matching (rapidfuzz)
     checks.py             The six validation checks
     validator.py          Runs checks → evidence report (no verdict)
+  decide/
+    policy.py             Load policy_config + data-driven severity map
+    engine.py             Pure resolver: evidence + confidence + policy → verdict
+    reason.py             Deterministic reason + review-payload assembly
+    commit.py             Race-safe PO balance update + verdict persistence
   governance/
-    recorder.py           Append-only audit trail (runs, events, reports)
+    recorder.py           Append-only audit trail (runs, events, reports, verdicts)
   generate/
     invoice_generator.py     v0 synthetic PDFs (extraction tests)
     invoice_generator_v1.py  v1 synthetic PDFs (validation tests)
-validate_all.py           CLI harness — runs all 9 invoices, prints the matrix
+validate_all.py           CLI harness — runs all 11 invoices, prints the matrix + verdicts
 docker-compose.yml        Local Postgres
 docs/
   MANUAL_TESTING.md       Step-by-step manual test guide
@@ -58,6 +67,7 @@ tests/
   test_extraction.py      Extraction schema + behaviour (live, needs API key)
   test_validation.py      Pure validation logic (no infra)
   test_governance.py      Postgres + governance integration (skip-if-down)
+  test_decision.py        Decision engine — pure matrix + DB commit (skip-if-down)
 ```
 
 ## Setup
@@ -102,18 +112,19 @@ uvicorn src.extract.api:app --reload
 |----------|---------|
 | `GET  /health` | Liveness + whether the API key is set |
 | `POST /extract` | PDF → structured extraction JSON only |
-| `POST /process` | PDF → full pipeline: extraction + validation evidence |
-| `GET  /audit/{invoice_number}` | Ordered governance trail for an invoice |
+| `POST /process` | PDF → full pipeline: extraction + validation evidence + **verdict** |
+| `GET  /audit/{invoice_number}` | Ordered governance trail + latest verdict |
 
 ```bash
 curl -s -X POST http://localhost:8000/process \
-  -F "file=@data/inputs/normal_1_dell.pdf" | python3 -m json.tool
+  -F "file=@data/inputs/edge_4_dell_line_mismatch.pdf" | python3 -m json.tool
 
-curl -s http://localhost:8000/audit/DEL%2F2026%2F0412 | python3 -m json.tool
+curl -s http://localhost:8000/audit/DEL%2F2026%2F0419 | python3 -m json.tool
 ```
 
-Every run is recorded to the append-only governance trail in Postgres
-(`pipeline_runs`, `governance_events`, `validation_reports`). Audit writes are
+`/process` returns `{run_id, extraction, validation, decision}`. Every run is
+recorded to the append-only governance trail in Postgres (`pipeline_runs`,
+`governance_events`, `validation_reports`, `verdicts`). Audit writes are
 best-effort — a logging failure never breaks the response.
 
 ## The validation checks
@@ -177,6 +188,65 @@ matching misses.
 }
 ```
 
+## The decision engine
+
+The engine turns evidence into one verdict by **severity precedence** —
+`REJECT > FLAG > APPROVE` — taking the most severe contribution across all
+signals. A single hard failure rejects; anything uncertain, over-authority, or
+anomalous lands in `FLAG` (the safety valve) rather than a wrong auto-approve.
+
+| Signal | Contributes |
+|--------|-------------|
+| `po_lookup` / `vendor_approved` / `po_status` / `duplicate` fail | **REJECT** |
+| `total_tolerance` / `line_reconciliation` fail | **FLAG** |
+| extraction `overall` confidence < `min_confidence` | **FLAG** (low_confidence) |
+| any required field missing | **FLAG** (incomplete) |
+| invoice total > `auto_approve_ceiling` | **FLAG** (over_authority) |
+| `line_reconciliation` skip (bundled / embedded-tax) | no contribution; noted in reason |
+| everything clean | **APPROVE** |
+
+The map is **data-driven**: `policy_config.severity_overrides` (JSONB) remaps any
+signal's severity without a code change. Governance defaults (in `policy_config`,
+stamped onto every verdict as `policy_version`):
+
+```
+auto_approve_ceiling = 750000      # INR; total above → FLAG (authority)
+min_confidence       = 0.75        # extraction overall below → FLAG
+policy_version       = "2026.06.1"
+```
+
+On **APPROVE only**, the engine decrements the PO `remaining_balance` inside a
+`SELECT … FOR UPDATE` transaction (closing the PO at zero). If a concurrent
+invoice drew the balance down since validation, the approve is **downgraded to
+FLAG** rather than over-committing the PO — verdict, balance change, and
+governance event commit or roll back together. The decision path is
+deterministic and LLM-free; reasons are reproducible byte-for-byte.
+
+### Verdict object (the only place a verdict is written)
+
+```json
+{
+  "invoice_number": "DEL/2026/0419",
+  "po_reference": "PO-5001",
+  "verdict": "FLAG",
+  "reason": "Flagged for review: line items do not reconcile with the PO (2 of 2 line(s) mismatch). The invoice total matches the PO within tolerance, so a human should confirm the substitution.",
+  "drivers": [
+    {"signal": "line_reconciliation", "outcome": "fail", "severity": "FLAG", "detail": "2 of 2 line(s) mismatch"},
+    {"signal": "total_tolerance", "outcome": "pass", "severity": "APPROVE", "detail": "within 0.0% of PO balance (allowed 3%)"}
+  ],
+  "requires_human_review": true,
+  "review_payload": {"queue": "line_variance", "what_to_check": "Confirm the billed quantities and unit prices against the PO before payment.", "extracted_total": 566400, "po_balance": 566400},
+  "confidence_overall": 0.95,
+  "policy_version": "2026.06.1",
+  "auto_approve_ceiling_applied": 750000,
+  "po_balance_after": null,
+  "decided_at": "2026-06-10T12:00:00Z"
+}
+```
+
+`po_balance_after` is non-null only on APPROVE; `requires_human_review` is true
+iff the verdict is FLAG.
+
 ## Extraction output schema (always this shape, missing values are `null`)
 
 ```json
@@ -203,38 +273,56 @@ matching misses.
 }
 ```
 
-## The validation matrix
+## The verdict matrix
 
-Run the whole v1 invoice set through the pipeline and print the check matrix:
+Run the whole invoice set through the pipeline and print the check matrix + the
+verdict column:
 
 ```bash
 python validate_all.py --dry-run     # answer-key extraction, no LLM call
 python validate_all.py               # live extraction (needs ANTHROPIC_API_KEY)
 ```
 
-| Invoice | po_lookup | vendor | status | total_tol | line_recon | duplicate |
-|---------|-----------|--------|--------|-----------|------------|-----------|
-| normal_1…5 | pass | pass | pass | pass | pass | pass |
-| edge_1 (scanned) | pass | pass | pass | pass | pass | pass |
-| edge_2 (bundled) | pass | pass | pass | pass | **skip** | pass |
-| edge_3 (embedded tax) | pass | pass | pass | pass | pass | pass |
-| edge_4 (line mismatch) | pass | pass | pass | **pass** | **fail** | pass |
+| Invoice | Verdict | Dominant driver |
+|---------|---------|-----------------|
+| normal_1…5 | **APPROVE** | clean, confident, under ceiling (decrements PO) |
+| edge_1 (scanned) | **FLAG** | low_confidence |
+| edge_2 (bundled, ₹8.02L) | **FLAG** | over_authority (line-recon skip noted) |
+| edge_3 (embedded tax) | **APPROVE** | lines reconcile via derived ex-tax |
+| edge_4 (line mismatch) | **FLAG** | line_reconciliation (total still matches) |
+| edge_5 (Globex → PO-9999) | **REJECT** | po_lookup + vendor_approved |
+| edge_6 (closed PO-5003) | **REJECT** | po_status |
+| any invoice re-run | **REJECT** | duplicate |
 
-By default the harness resets operational state so the matrix is reproducible;
-pass `--keep` to accumulate across runs (and watch `duplicate` flip to fail on a
-second sighting).
+Three distinct FLAG reasons (confidence, authority, line variance) and two
+distinct REJECT reasons (not-found/fraud, closed PO). The matrix is per-invoice
+in isolation — the harness reseeds PO balances before each invoice so one
+approval's decrement doesn't change another's verdict. By default it also resets
+operational state for reproducibility; `--keep` accumulates (watch `duplicate`
+flip to REJECT on a second run).
+
+Verdicts are data-driven — lower the ceiling and the normals flip with no code
+change:
+
+```bash
+docker exec ap_invoices_db psql -U ap -d ap_invoices \
+  -c "UPDATE policy_config SET auto_approve_ceiling=200000 WHERE id=1;"
+python validate_all.py --dry-run     # normals now FLAG (over_authority)
+```
 
 ## Tests
 
 ```bash
-pytest tests/test_validation.py -v   # pure logic, no infra
+pytest tests/test_validation.py -v   # pure validation logic, no infra
+pytest tests/test_decision.py -v     # decision matrix (pure) + commit (skips if DB down)
 pytest tests/test_governance.py -v   # Postgres integration (skips if DB down)
 pytest tests/test_extraction.py -v   # extraction (live-model tests skip w/o key)
 ```
 
-`test_validation.py` always runs (it injects in-memory reference data).
-`test_governance.py` skips cleanly when Postgres is unreachable. Live-model
-extraction tests skip cleanly when `ANTHROPIC_API_KEY` is not set.
+`test_validation.py` and the pure half of `test_decision.py` always run (they
+inject in-memory reference data). The DB-backed tests skip cleanly when Postgres
+is unreachable. Live-model extraction tests skip when `ANTHROPIC_API_KEY` is
+unset.
 
 ## Stack
 

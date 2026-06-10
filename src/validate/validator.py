@@ -94,6 +94,7 @@ def validate(
         "invoice_number": inv_number,
         "po_reference":   inv_po_ref,
         "matched_po":     matched_po["po_id"] if matched_po else None,
+        "po_balance":     matched_po["remaining_balance"] if matched_po else None,
         "checks":         all_checks,
         "summary":        summary,
         "events": [

@@ -107,3 +107,33 @@ CREATE TABLE IF NOT EXISTS governance_events (
 );
 CREATE INDEX IF NOT EXISTS idx_governance_events_run ON governance_events (run_id);
 CREATE INDEX IF NOT EXISTS idx_governance_events_stage ON governance_events (stage);
+
+-- --------------------------------------------------------------------------
+-- Decision engine (v3)
+-- --------------------------------------------------------------------------
+-- Governance policy columns added for the decision engine. The existing
+-- single policy row is backfilled by the seed upsert.
+ALTER TABLE policy_config ADD COLUMN IF NOT EXISTS min_confidence     NUMERIC(4, 3);
+ALTER TABLE policy_config ADD COLUMN IF NOT EXISTS policy_version     TEXT;
+ALTER TABLE policy_config ADD COLUMN IF NOT EXISTS severity_overrides JSONB;
+
+-- The verdict — the one place a verdict is written. Evidence (validation_reports)
+-- stays separate from the verdict (this table); the two are joined by run_id.
+CREATE TABLE IF NOT EXISTS verdicts (
+    verdict_id                   BIGSERIAL PRIMARY KEY,
+    run_id                       UUID REFERENCES pipeline_runs (run_id),
+    invoice_number               TEXT,
+    po_reference                 TEXT,
+    verdict                      TEXT NOT NULL,        -- APPROVE | FLAG | REJECT
+    reason                       TEXT NOT NULL,
+    drivers                      JSONB NOT NULL,
+    requires_human_review        BOOLEAN NOT NULL,
+    review_payload               JSONB,
+    confidence_overall           NUMERIC(4, 3),
+    policy_version               TEXT,
+    auto_approve_ceiling_applied NUMERIC(14, 2),
+    po_balance_after             NUMERIC(14, 2),       -- non-null only on APPROVE
+    decided_at                   TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_verdicts_invoice ON verdicts (invoice_number);
+CREATE INDEX IF NOT EXISTS idx_verdicts_run ON verdicts (run_id);
