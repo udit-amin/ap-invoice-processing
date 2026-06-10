@@ -37,9 +37,10 @@ a table), `\x` (toggle expanded row output — useful for JSONB), `\q` (quit).
 | `invoices` | Dedup ledger — `UNIQUE(invoice_number, vendor_name)` |
 | `validation_reports` | Full evidence report per run, as JSONB |
 | `governance_events` | Append-only audit trail: one+ row per stage |
+| `verdicts` | The decision per run: verdict, reason, drivers, `po_balance_after` |
 
 `vendors` / `purchase_orders` / `po_line_items` / `policy_config` are seeded
-reference data. The other four are written at runtime by the pipeline.
+reference data. The rest are written at runtime by the pipeline.
 
 ---
 
@@ -57,8 +58,19 @@ FROM purchase_orders ORDER BY po_id;
 SELECT line_no, description, quantity, unit_price
 FROM po_line_items WHERE po_id = 'PO-5001' ORDER BY line_no;
 
--- Governance policy (single row)
-SELECT * FROM policy_config;
+-- Governance policy (single row): ceiling, confidence gate, version, overrides
+SELECT auto_approve_ceiling, min_confidence, policy_version, severity_overrides
+FROM policy_config;
+```
+
+Policy is read fresh on every decision, so changing it here flips verdicts with
+no code change:
+
+```sql
+-- Lower the auto-approve ceiling → invoices over it FLAG (over_authority)
+UPDATE policy_config SET auto_approve_ceiling = 200000 WHERE id = 1;
+-- Make a tolerance failure a hard REJECT instead of a FLAG (data-driven map)
+UPDATE policy_config SET severity_overrides = '{"total_tolerance":"REJECT"}' WHERE id = 1;
 ```
 
 ---
@@ -179,13 +191,49 @@ check rather than inserting a new row.
 
 ---
 
+## Verdicts (decision engine)
+
+```sql
+-- Latest verdict per invoice with the reason and (on APPROVE) the new PO balance
+SELECT invoice_number, verdict, po_balance_after, policy_version, reason
+FROM verdicts
+ORDER BY decided_at DESC;
+
+-- Verdict distribution
+SELECT verdict, count(*) FROM verdicts GROUP BY verdict ORDER BY verdict;
+
+-- Why was this flagged/rejected? Each driver's contribution (\x recommended)
+SELECT d->>'signal'   AS signal,
+       d->>'outcome'  AS outcome,
+       d->>'severity' AS severity,
+       d->>'detail'   AS detail
+FROM verdicts v, jsonb_array_elements(v.drivers) AS d
+WHERE v.invoice_number = 'DEL/2026/0419'
+ORDER BY severity DESC;
+
+-- The human-review queue: everything that needs a person, with what to check
+SELECT invoice_number,
+       review_payload->>'queue'         AS queue,
+       review_payload->>'what_to_check' AS what_to_check
+FROM verdicts
+WHERE requires_human_review
+ORDER BY decided_at DESC;
+```
+
+The verdict and its PO balance decrement are written in one transaction, so a
+`verdicts` row with a non-null `po_balance_after` always matches the PO's
+`remaining_balance` change.
+
+---
+
 ## Resetting operational state
 
 Wipe runtime data but keep the seeded reference data — handy between manual test
-runs:
+runs. (Reseed afterwards if you want APPROVE-decremented PO balances restored:
+`python -m src.db.seed`.)
 
 ```sql
-TRUNCATE governance_events, validation_reports, invoices, pipeline_runs
+TRUNCATE governance_events, validation_reports, verdicts, invoices, pipeline_runs
   RESTART IDENTITY CASCADE;
 ```
 
@@ -193,7 +241,7 @@ Or from the shell:
 
 ```bash
 docker exec ap_invoices_db psql -U ap -d ap_invoices \
-  -c "TRUNCATE governance_events, validation_reports, invoices, pipeline_runs RESTART IDENTITY CASCADE;"
+  -c "TRUNCATE governance_events, validation_reports, verdicts, invoices, pipeline_runs RESTART IDENTITY CASCADE;"
 ```
 
 To reset *everything* including reference data, recreate the container and

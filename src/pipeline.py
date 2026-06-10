@@ -10,6 +10,8 @@ from __future__ import annotations
 from src.extract.extractor import extract
 from src.validate.validator import validate
 from src.governance import recorder
+from src.decide import engine, commit
+from src.decide.policy import load_policy
 
 
 def process_invoice(pdf_path: str, invoice_path_label: str | None = None) -> dict:
@@ -47,5 +49,22 @@ def process_invoice(pdf_path: str, invoice_path_label: str | None = None) -> dic
 
     validation = validate(extraction, run_id=run_id)
 
+    # Decide: evidence + confidence + policy → verdict (the one place a verdict
+    # is written). commit_decision persists it and, on APPROVE, decrements the
+    # PO balance in a race-safe transaction.
+    policy = load_policy()
+    verdict = engine.decide(validation, extraction, policy)
+    decision = commit.commit_decision(
+        verdict,
+        matched_po_id=validation.get("matched_po"),
+        invoice_total=extraction.get("total"),
+        run_id=run_id,
+    )
+
     recorder.finish_run(run_id, overall_conf=conf)
-    return {"run_id": run_id, "extraction": extraction, "validation": validation}
+    return {
+        "run_id": run_id,
+        "extraction": extraction,
+        "validation": validation,
+        "decision": decision,
+    }

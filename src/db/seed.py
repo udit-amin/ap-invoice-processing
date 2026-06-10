@@ -25,6 +25,8 @@ VENDORS = [
     ("V-009", "Quanta Networks",                   True,  "Networking"),
     # V-010 intentionally unapproved — wired for a future fraud edge case.
     ("V-010", "Globex Corporation",                False, "Unknown"),
+    # V-011 approved — bills the closed PO-5003 in edge_6 (isolates po_status).
+    ("V-011", "CloudHost Services India",          True,  "Hosting"),
 ]
 
 # (po_id, vendor_id, vendor_name, description, approved_amount,
@@ -79,8 +81,14 @@ PURCHASE_ORDERS = [
      ]),
 ]
 
-# (id, auto_approve_ceiling, default_tolerance_pct, confidence_threshold)
-POLICY = (1, 50000.0, 5.0, float(config.CONFIDENCE_THRESHOLD))
+# (id, auto_approve_ceiling, default_tolerance_pct, confidence_threshold,
+#  min_confidence, policy_version, severity_overrides)
+# Ceiling 750000 so the five normals auto-approve and edge_2 (₹8.02L) trips
+# authority review. min_confidence 0.75 is the decision-engine confidence gate.
+POLICY = (
+    1, 750000.0, 5.0, float(config.CONFIDENCE_THRESHOLD),
+    0.75, "2026.06.1", "{}",
+)
 
 
 def seed() -> None:
@@ -100,7 +108,11 @@ def seed() -> None:
                    (po_id, vendor_id, vendor_name, description,
                     approved_amount, remaining_balance, status, tolerance_pct)
                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
-                   ON CONFLICT (po_id) DO NOTHING""",
+                   ON CONFLICT (po_id) DO UPDATE SET
+                       remaining_balance = EXCLUDED.remaining_balance,
+                       status            = EXCLUDED.status,
+                       approved_amount   = EXCLUDED.approved_amount,
+                       tolerance_pct     = EXCLUDED.tolerance_pct""",
                 (po_id, vendor_id, vendor_name, desc, approved, remaining, status, tol),
             )
             # Replace line items so reseeding stays consistent with the PO.
@@ -115,9 +127,16 @@ def seed() -> None:
 
         cur.execute(
             """INSERT INTO policy_config
-               (id, auto_approve_ceiling, default_tolerance_pct, confidence_threshold)
-               VALUES (%s, %s, %s, %s)
-               ON CONFLICT (id) DO NOTHING""",
+               (id, auto_approve_ceiling, default_tolerance_pct, confidence_threshold,
+                min_confidence, policy_version, severity_overrides)
+               VALUES (%s, %s, %s, %s, %s, %s, %s)
+               ON CONFLICT (id) DO UPDATE SET
+                   auto_approve_ceiling  = EXCLUDED.auto_approve_ceiling,
+                   default_tolerance_pct = EXCLUDED.default_tolerance_pct,
+                   confidence_threshold  = EXCLUDED.confidence_threshold,
+                   min_confidence        = EXCLUDED.min_confidence,
+                   policy_version        = EXCLUDED.policy_version,
+                   severity_overrides    = EXCLUDED.severity_overrides""",
             POLICY,
         )
         cur.connection.commit()

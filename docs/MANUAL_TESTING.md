@@ -28,8 +28,9 @@ python -m src.generate.invoice_generator       # v0 set (extraction tests)
 python -m src.generate.invoice_generator_v1    # v1 set (validation tests)
 ```
 
-`python -m src.db.seed` prints a summary; expect **10 vendors (9 approved), 10
-purchase orders (1 closed), 16 line items, 1 policy row**.
+`python -m src.db.seed` prints a summary; expect **11 vendors (10 approved), 10
+purchase orders (1 closed), 16 line items, 1 policy row**. (The `edge_5`/`edge_6`
+PDFs ship in `data/inputs/`; they aren't produced by the generators.)
 
 An Anthropic API key is optional. Without it, use `--dry-run` and the
 answer-key extraction; the LLM-backed extraction tests skip cleanly.
@@ -43,22 +44,23 @@ export ANTHROPIC_API_KEY=sk-ant-...   # optional
 ## 2. Run the automated suites
 
 ```bash
-# Pure validation logic — no database, no API key required
-pytest tests/test_validation.py -v        # expect: all pass
+# Pure logic — no database, no API key required
+pytest tests/test_validation.py -v         # expect: all pass
+pytest tests/test_decision.py -v           # pure matrix passes; DB tests skip if down
 
-# Postgres + governance integration — needs the DB up
+# Postgres integration — needs the DB up
 pytest tests/test_governance.py -v         # expect: all pass
 
 # Extraction — live-model tests skip without an API key
 pytest tests/test_extraction.py -v
 ```
 
-**Prove the skip-if-down safety net.** Stop Postgres and rerun the first two:
+**Prove the skip-if-down safety net.** Stop Postgres and rerun:
 
 ```bash
 docker compose stop
-pytest tests/test_validation.py tests/test_governance.py
-#   → test_validation.py all pass, test_governance.py all SKIPPED
+pytest tests/test_validation.py tests/test_decision.py tests/test_governance.py
+#   → pure tests pass; the DB-backed tests SKIP cleanly
 docker compose start            # bring it back up before continuing
 ```
 
@@ -66,24 +68,32 @@ docker compose start            # bring it back up before continuing
 
 ## 3. Run the end-to-end harness
 
-This runs all nine v1 invoices through the full pipeline and prints the check
-matrix. `--dry-run` uses the answer key instead of calling the model.
+This runs all eleven invoices through the full pipeline (ingest → extract →
+match → validate → **decide**) and prints the check matrix plus a **Verdict**
+column. `--dry-run` uses the answer key instead of calling the model.
 
 ```bash
 python validate_all.py --dry-run
 ```
 
-What to verify in the output:
+What to verify in the verdict column:
 
-- Every `normal_*` and `edge_1`/`edge_3` row is all `✓`.
-- `edge_2_techgear_bundled` → `line_reconciliation` is `–` (**skip**, bundled).
-- `edge_4_dell_line_mismatch` → `total_tolerance` is `✓` but
-  `line_reconciliation` is `✗` (**fail**), with `qty_and_price_variance` detail
-  printed underneath. This is the case that proves line reconciliation catches
-  what total matching misses.
+- `normal_1…5` and `edge_3` → **APPROVE**.
+- `edge_1` (scanned) → **FLAG** — confidence below the 0.75 gate.
+- `edge_2` (bundled, ₹8.02L) → **FLAG** — over the ₹7.5L authority ceiling;
+  `line_reconciliation` is `–` (skip), which alone does *not* flag.
+- `edge_4` → **FLAG** — `total_tolerance` is `✓` but `line_reconciliation` is
+  `✗`; line reconciliation catches what total matching misses.
+- `edge_5` (Globex → PO-9999) → **REJECT** — `po_lookup` ✗ + `vendor_approved` ✗.
+- `edge_6` (closed PO-5003) → **REJECT** — `po_status` ✗ (clean single driver).
 
-By default the harness resets operational tables first so the matrix is
-reproducible. Use `--keep` to accumulate across runs (see next step).
+The per-invoice reason lines below the matrix should show three distinct FLAG
+reasons (confidence, authority, line variance) and two distinct REJECT reasons.
+
+The matrix is per-invoice in isolation: the harness reseeds PO balances before
+each invoice so one approval's decrement doesn't change another's verdict. By
+default it also resets operational tables for reproducibility; `--keep`
+accumulates across runs (next step).
 
 ---
 
@@ -107,7 +117,39 @@ state), or reset manually — see [QUERYING_THE_DB.md](QUERYING_THE_DB.md#resett
 
 ---
 
-## 5. Exercise the API
+## 5. Prove the decision-engine guarantees
+
+**Policy is data, not code (AC#5).** Lower the auto-approve ceiling and the
+normals flip to FLAG with no code change:
+
+```bash
+docker exec ap_invoices_db psql -U ap -d ap_invoices \
+  -c "UPDATE policy_config SET auto_approve_ceiling=200000 WHERE id=1;"
+python validate_all.py --dry-run     # normal_1 (₹5.66L) now FLAG (over_authority)
+docker exec ap_invoices_db psql -U ap -d ap_invoices \
+  -c "UPDATE policy_config SET auto_approve_ceiling=750000 WHERE id=1;"   # restore
+```
+
+**APPROVE decrements the PO; a stale approve downgrades (AC#4).** Process a clean
+Dell invoice live — it APPROVEs and draws PO-5001 to zero, closing it:
+
+```bash
+python -m src.db.seed     # restore PO-5001 balance to 566400/open
+curl -s -X POST localhost:8000/process -F file=@data/inputs/normal_1_dell.pdf \
+  | python3 -c "import sys,json; d=json.load(sys.stdin)['decision']; print(d['verdict'], d['po_balance_after'])"
+# → APPROVE 0.0
+docker exec ap_invoices_db psql -U ap -d ap_invoices \
+  -c "SELECT remaining_balance, status FROM purchase_orders WHERE po_id='PO-5001';"
+# → 0.00 | closed
+```
+
+The race-safe downgrade (a second invoice that would over-commit the PO becomes
+FLAG inside the commit lock, never over-drawing) is covered deterministically by
+`pytest tests/test_decision.py -k downgrade`.
+
+---
+
+## 6. Exercise the API
 
 Start the server in one terminal:
 
@@ -139,30 +181,34 @@ curl -s http://localhost:8000/audit/DEL%2F2026%2F0419 | python3 -m json.tool
 
 What to verify:
 
-- `/process` returns `{run_id, extraction, validation}`. For
-  `edge_4_dell_line_mismatch`, the `validation` block shows
-  `total_tolerance: pass` and `line_reconciliation: fail`.
+- `/process` returns `{run_id, extraction, validation, decision}`. For
+  `edge_4_dell_line_mismatch`, `validation` shows `total_tolerance: pass` and
+  `line_reconciliation: fail`, and `decision.verdict` is **FLAG** with
+  `review_payload.queue == "line_variance"`.
 - `/audit/{invoice_number}` returns the ordered event trail
-  (`ingest → extract → match → match → validate × 4`) plus the latest
-  validation report. A never-seen invoice number returns **404**.
+  (`ingest → extract → match → match → validate ×4 → decision`) plus the latest
+  validation report and `latest_verdict`. A never-seen invoice → **404**.
 
 ---
 
-## 6. Expected outcomes at a glance
+## 7. Expected outcomes at a glance
 
 | What you did | Expected result |
 |--------------|-----------------|
-| `python -m src.db.seed` | 10 vendors / 10 POs / 16 lines / 1 policy |
+| `python -m src.db.seed` | 11 vendors / 10 POs / 16 lines / 1 policy |
 | `pytest tests/test_validation.py` | all pass, no infra needed |
-| `pytest tests/test_governance.py` (DB up) | all pass |
-| `pytest tests/test_governance.py` (DB down) | all skipped |
-| `validate_all.py --dry-run` | matrix with edge_2 skip, edge_4 line-recon fail |
-| `validate_all.py --dry-run --keep` (2nd run) | duplicate flips to fail |
+| `pytest tests/test_decision.py` (DB up) | all pass (pure + commit) |
+| `pytest tests/test_decision.py` (DB down) | pure pass, commit tests skipped |
+| `pytest tests/test_governance.py` (DB up / down) | all pass / all skipped |
+| `validate_all.py --dry-run` | verdicts: 6 APPROVE, 3 FLAG, 2 REJECT |
+| `validate_all.py --dry-run --keep` (2nd run) | every verdict → REJECT (duplicate) |
+| lower `auto_approve_ceiling` to 200000 | normals flip APPROVE → FLAG |
+| live `/process` of normal_1 | APPROVE, PO-5001 balance → 0 / closed |
 | `GET /audit/{unknown}` | HTTP 404 |
 
 ---
 
-## 7. Teardown
+## 8. Teardown
 
 ```bash
 docker compose down          # stop Postgres, keep the data volume

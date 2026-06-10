@@ -1,14 +1,20 @@
-"""End-to-end validation harness.
+"""End-to-end pipeline harness.
 
-For each of the 9 v1 invoices:
+For each invoice:
   1. Extracts (live, via the pipeline) or loads the answer-key JSON (--dry-run).
-  2. Runs the full governance pipeline (ingest -> extract -> match -> validate),
-     persisting events + report to Postgres.
-  3. Prints the check matrix and per-invoice failure detail.
+  2. Runs the full governance pipeline (ingest -> extract -> match -> validate
+     -> decide), persisting events, report, and verdict to Postgres.
+  3. Prints the check matrix + the Verdict column, then per-invoice verdict/reason.
 
-By default the harness resets operational state (pipeline_runs, invoices,
-validation_reports, governance_events) first so the matrix is reproducible;
-pass --keep to accumulate across runs (and watch duplicates flip to fail).
+The §7 verdict matrix is per-invoice-in-isolation, so PO balances are reseeded
+before each invoice — otherwise one invoice's APPROVE decrement would change a
+later invoice's verdict (e.g. normal_1 and edge_4 both bill PO-5001). The
+balance decrement + race downgrade are exercised by tests/test_decision.py and
+live /process.
+
+By default the harness also resets operational state (runs/verdicts/events/
+reports) first so the run is reproducible; pass --keep to accumulate (and watch
+duplicates flip to REJECT).
 
 Usage:
     python validate_all.py              # live extraction via the pipeline
@@ -23,11 +29,14 @@ import sys
 
 from src import config
 from src.db.connection import cursor
+from src.db import seed as _seed
 from src.governance import recorder
 from src.validate.validator import validate
+from src.decide import engine, commit
+from src.decide.policy import load_policy
 from src import pipeline
 
-V1_INVOICES = [
+INVOICES = [
     "normal_1_dell.pdf",
     "normal_2_stellar.pdf",
     "normal_3_fastfreight.pdf",
@@ -37,6 +46,8 @@ V1_INVOICES = [
     "edge_2_techgear_bundled.pdf",
     "edge_3_blueprint_embedded_tax.pdf",
     "edge_4_dell_line_mismatch.pdf",
+    "edge_5_globex_unapproved.pdf",
+    "edge_6_cloudhost_closed_po.pdf",
 ]
 
 ANSWER_KEY_PATH = config.DATA_DIR / "expected_extraction_answer_key.json"
@@ -47,6 +58,11 @@ CHECK_ORDER = [
 ]
 
 _ICONS = {"pass": "✓", "fail": "✗", "skip": "–"}
+_VERDICT_ICON = {"APPROVE": "APPROVE ✓", "FLAG": "FLAG ⚑", "REJECT": "REJECT ✗"}
+
+# Confidence assigned in dry-run: below the policy gate when the invoice is a
+# low-confidence (scanned) fixture, comfortably above otherwise.
+_LOW_CONF, _HIGH_CONF = 0.62, 0.95
 
 
 def _answer_key_to_extracted(filename: str, ak: dict) -> dict:
@@ -55,6 +71,7 @@ def _answer_key_to_extracted(filename: str, ak: dict) -> dict:
     raw_lines = entry.get("line_items", [])
     tax_mode = entry.get("tax_mode", "separate")
     is_bundled = entry.get("is_bundled", False)
+    overall = _HIGH_CONF if entry.get("expect_high_confidence", True) else _LOW_CONF
 
     line_items = []
     for li in raw_lines:
@@ -85,8 +102,8 @@ def _answer_key_to_extracted(filename: str, ak: dict) -> dict:
         },
         "total":         entry.get("total"),
         "extraction_confidence": {
-            "invoice_number": 0.90, "vendor_name": 0.90,
-            "po_reference": 0.90, "total": 0.90, "overall": 0.90,
+            "invoice_number": overall, "vendor_name": overall,
+            "po_reference": overall, "total": overall, "overall": overall,
         },
         "extraction_notes": [],
         "error": None,
@@ -96,9 +113,21 @@ def _answer_key_to_extracted(filename: str, ak: dict) -> dict:
 def _reset_operational_state() -> None:
     with cursor() as cur:
         cur.execute(
-            "TRUNCATE governance_events, validation_reports, invoices, "
+            "TRUNCATE governance_events, validation_reports, verdicts, invoices, "
             "pipeline_runs RESTART IDENTITY CASCADE"
         )
+
+
+def _reset_po_balances() -> None:
+    """Restore every PO's balance/status to the seeded baseline (per-invoice
+    isolation for the matrix)."""
+    with cursor() as cur:
+        for po in _seed.PURCHASE_ORDERS:
+            cur.execute(
+                "UPDATE purchase_orders SET remaining_balance = %s, status = %s "
+                "WHERE po_id = %s",
+                (po[5], po[6], po[0]),
+            )
 
 
 def _status_cell(report: dict, check_name: str) -> str:
@@ -106,8 +135,9 @@ def _status_cell(report: dict, check_name: str) -> str:
     return _ICONS.get(by_name.get(check_name, {}).get("status", "?"), "?")
 
 
-def _validate_from_answer_key(filename: str, extracted: dict) -> dict:
+def _process_from_answer_key(filename: str, extracted: dict) -> tuple[dict, dict]:
     """Mirror pipeline.process_invoice but with answer-key extraction."""
+    overall = (extracted.get("extraction_confidence") or {}).get("overall")
     run_id = recorder.start_run(
         invoice_path=filename,
         invoice_number=extracted.get("invoice_number"),
@@ -117,10 +147,13 @@ def _validate_from_answer_key(filename: str, extracted: dict) -> dict:
     )
     recorder.log_event(run_id, recorder.INGEST, recorder.OK, {"invoice_path": filename})
     recorder.log_event(run_id, recorder.EXTRACT, recorder.OK,
-                       {"source_type": extracted.get("source_type"), "overall_conf": 0.90})
+                       {"source_type": extracted.get("source_type"), "overall_conf": overall})
     report = validate(extracted, run_id=run_id)
-    recorder.finish_run(run_id, overall_conf=0.90)
-    return report
+    verdict = engine.decide(report, extracted, load_policy())
+    decision = commit.commit_decision(
+        verdict, report.get("matched_po"), extracted.get("total"), run_id)
+    recorder.finish_run(run_id, overall_conf=overall)
+    return report, decision
 
 
 def main():
@@ -144,43 +177,42 @@ def main():
 
     if not args.keep:
         _reset_operational_state()
-        print("[harness] Operational state reset (pipeline_runs/invoices/"
-              "validation_reports/governance_events).\n")
+        print("[harness] Operational state reset (runs/verdicts/events/reports).\n")
 
     if use_api:
         from src.generate.invoice_generator_v1 import generate_missing
         generate_missing()
 
     col_w = 34
-    hdr = f"{'Invoice':<{col_w}}" + "".join(f"{n[:8]:>12}" for n in CHECK_ORDER)
+    hdr = (f"{'Invoice':<{col_w}}"
+           + "".join(f"{n[:8]:>10}" for n in CHECK_ORDER)
+           + f"{'Verdict':>12}")
     print(hdr)
     print("-" * len(hdr))
 
-    reports = []
-    for filename in V1_INVOICES:
+    rows = []
+    for filename in INVOICES:
+        _reset_po_balances()  # judge each invoice against the seeded baseline
         pdf_path = config.INPUTS_DIR / filename
         if use_api:
-            report = pipeline.process_invoice(str(pdf_path), invoice_path_label=filename)["validation"]
+            res = pipeline.process_invoice(str(pdf_path), invoice_path_label=filename)
+            report, decision = res["validation"], res["decision"]
         else:
             extracted = _answer_key_to_extracted(filename, answer_key)
-            report = _validate_from_answer_key(filename, extracted)
+            report, decision = _process_from_answer_key(filename, extracted)
 
-        reports.append((filename, report))
-        row = f"{filename:<{col_w}}" + "".join(
-            f"{_status_cell(report, n):>12}" for n in CHECK_ORDER
-        )
-        print(row)
+        rows.append((filename, report, decision))
+        line = (f"{filename:<{col_w}}"
+                + "".join(f"{_status_cell(report, n):>10}" for n in CHECK_ORDER)
+                + f"{_VERDICT_ICON.get(decision['verdict'], decision['verdict']):>12}")
+        print(line)
 
     print("-" * len(hdr))
-    print("\nLegend: ✓ pass   ✗ fail   – skip\n")
+    print("\nChecks: ✓ pass  ✗ fail  – skip      Verdict: ✓ approve  ⚑ flag  ✗ reject\n")
 
-    for filename, report in reports:
-        failed = [c for c in report["checks"] if c["status"] == "fail"]
-        for c in failed:
-            print(f"  {filename} — [{c['check']}] {c['reason']}")
-            for d in c.get("detail", []):
-                print(f"      • {d['classification']}: "
-                      f"{d.get('invoice_line') or d.get('matched_po_line')}")
+    for filename, report, decision in rows:
+        print(f"  {filename} — {decision['verdict']}")
+        print(f"      {decision['reason']}")
 
 
 if __name__ == "__main__":
