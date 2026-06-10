@@ -21,16 +21,24 @@ pip install -r requirements.txt
 docker compose up -d
 
 # Apply schema + seed reference data (vendors, POs + line items, policy)
-python -m src.db.seed
+python -m app.db.seed
+
+# Seed the four demo users (2 clerks, 2 managers)
+python -m app.users.seed
 
 # Generate the synthetic test invoices
-python -m src.generate.invoice_generator       # v0 set (extraction tests)
-python -m src.generate.invoice_generator_v1    # v1 set (validation tests)
+python -m app.generate.invoice_generator       # v0 set (extraction tests)
+python -m app.generate.invoice_generator_v1    # v1 set (validation tests)
 ```
 
-`python -m src.db.seed` prints a summary; expect **11 vendors (10 approved), 10
+`python -m app.db.seed` prints a summary; expect **11 vendors (10 approved), 10
 purchase orders (1 closed), 16 line items, 1 policy row**. (The `edge_5`/`edge_6`
 PDFs ship in `data/inputs/`; they aren't produced by the generators.)
+
+`python -m app.users.seed` prints `Seeded 4 users (2 clerks, 2 managers)`. Both
+seed commands are idempotent and also run automatically on API startup
+(see [§6](#6-exercise-the-api)), so this step is mostly useful for exercising the
+pipeline directly via `validate_all.py` before the server is up.
 
 An Anthropic API key is optional. Without it, use `--dry-run` and the
 answer-key extraction; the LLM-backed extraction tests skip cleanly.
@@ -47,6 +55,8 @@ export ANTHROPIC_API_KEY=sk-ant-...   # optional
 # Pure logic — no database, no API key required
 pytest tests/test_validation.py -v         # expect: all pass
 pytest tests/test_decision.py -v           # pure matrix passes; DB tests skip if down
+pytest tests/test_auth.py -v               # JWT roundtrip pure; login tests skip if DB down
+pytest tests/test_permissions.py -v        # route guard matrix — no DB needed
 
 # Postgres integration — needs the DB up
 pytest tests/test_governance.py -v         # expect: all pass
@@ -134,14 +144,27 @@ docker exec ap_invoices_db psql -U ap -d ap_invoices \
 Dell invoice live — it APPROVEs and draws PO-5001 to zero, closing it:
 
 ```bash
-python -m src.db.seed     # restore PO-5001 balance to 566400/open
-curl -s -X POST localhost:8000/process -F file=@data/inputs/normal_1_dell.pdf \
+python -m app.db.seed     # restore PO-5001 balance to 566400/open
+
+TOKEN=$(curl -s -X POST localhost:8000/auth/login \
+  -H 'Content-Type: application/json' \
+  -d '{"email":"priya@acmecorp.com","password":"demo-clerk-1"}' \
+  | python3 -c "import sys,json;print(json.load(sys.stdin)['access_token'])")
+
+curl -s -X POST localhost:8000/process -H "Authorization: Bearer $TOKEN" \
+  -F file=@data/inputs/normal_1_dell.pdf \
   | python3 -c "import sys,json; d=json.load(sys.stdin)['decision']; print(d['verdict'], d['po_balance_after'])"
 # → APPROVE 0.0
 docker exec ap_invoices_db psql -U ap -d ap_invoices \
   -c "SELECT remaining_balance, status FROM purchase_orders WHERE po_id='PO-5001';"
 # → 0.00 | closed
 ```
+
+> If this invoice was already processed in an earlier run, you'll get `REJECT
+> None` instead — duplicate detection is working as designed (see
+> [§4](#4-prove-race-proof-duplicate-detection)). Use `--keep`-free
+> `validate_all.py --dry-run` or pick a fixture you haven't run yet to see a
+> fresh `APPROVE`.
 
 The race-safe downgrade (a second invoice that would over-commit the PO becomes
 FLAG inside the commit lock, never over-drawing) is covered deterministically by
@@ -154,30 +177,52 @@ FLAG inside the commit lock, never over-drawing) is covered deterministically by
 Start the server in one terminal:
 
 ```bash
-uvicorn src.extract.api:app --reload
+uvicorn app.main:app --reload
 ```
+
+On startup the lifespan applies the schema, seeds reference data, and seeds the
+four demo users — so this works against an empty database.
 
 Interactive docs are at <http://localhost:8000/docs>. In another terminal:
 
 ```bash
-# Liveness
+# Liveness (public, no auth)
 curl -s http://localhost:8000/health | python3 -m json.tool
 
+# Log in as a clerk → grab a bearer token
+TOKEN=$(curl -s -X POST http://localhost:8000/auth/login \
+  -H 'Content-Type: application/json' \
+  -d '{"email":"priya@acmecorp.com","password":"demo-clerk-1"}' \
+  | python3 -c "import sys,json;print(json.load(sys.stdin)['access_token'])")
+
 # Extract only (structured JSON; no validation)
-curl -s -X POST http://localhost:8000/extract \
+curl -s -X POST http://localhost:8000/extract -H "Authorization: Bearer $TOKEN" \
   -F "file=@data/inputs/normal_1_dell.pdf" | python3 -m json.tool
 
 # Full pipeline: extraction + validation evidence + governance run
-curl -s -X POST http://localhost:8000/process \
+curl -s -X POST http://localhost:8000/process -H "Authorization: Bearer $TOKEN" \
   -F "file=@data/inputs/edge_4_dell_line_mismatch.pdf" | python3 -m json.tool
 
+# Audit trail requires a manager token (clerk token here → 403)
+MGR=$(curl -s -X POST http://localhost:8000/auth/login \
+  -H 'Content-Type: application/json' \
+  -d '{"email":"anjali@acmecorp.com","password":"demo-mgr-1"}' \
+  | python3 -c "import sys,json;print(json.load(sys.stdin)['access_token'])")
+
 # Audit trail for an invoice (note: '/' is URL-encoded as %2F)
-curl -s http://localhost:8000/audit/DEL%2F2026%2F0419 | python3 -m json.tool
+curl -s http://localhost:8000/audit/DEL%2F2026%2F0419 -H "Authorization: Bearer $MGR" \
+  | python3 -m json.tool
 ```
 
 > `/extract` and `/process` call the live model, so they need
 > `ANTHROPIC_API_KEY`. Without a key they return a structured `error` payload
 > (HTTP 200) rather than crashing.
+>
+> All three routes require a bearer token: `/extract` and `/process` are
+> **clerk**-only, `/audit/{invoice_number}` is **manager**-only. A missing or
+> invalid token → **401**; the wrong role → **403**. See
+> [README "Authentication & roles"](../README.md#authentication--roles) for the
+> full demo-user list.
 
 What to verify:
 
@@ -195,7 +240,7 @@ What to verify:
 
 | What you did | Expected result |
 |--------------|-----------------|
-| `python -m src.db.seed` | 11 vendors / 10 POs / 16 lines / 1 policy |
+| `python -m app.db.seed` | 11 vendors / 10 POs / 16 lines / 1 policy |
 | `pytest tests/test_validation.py` | all pass, no infra needed |
 | `pytest tests/test_decision.py` (DB up) | all pass (pure + commit) |
 | `pytest tests/test_decision.py` (DB down) | pure pass, commit tests skipped |

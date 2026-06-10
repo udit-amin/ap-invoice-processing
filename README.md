@@ -29,15 +29,26 @@ reproducible.
 ## What's here
 
 ```
-src/
-  config.py               Model string, thresholds, DB DSN, paths
-  pipeline.py             ingest → extract → match → validate → decide orchestrator
+app/
+  main.py                 FastAPI app factory + lifespan (migrate→seed→serve), /health
+  config.py               Model string, thresholds, DB DSN, JWT + tenant settings, paths
+  auth/
+    router.py             POST /auth/login, GET /auth/me
+    service.py            bcrypt hashing, JWT issue/verify, authenticate
+    dependencies.py       get_current_user + require_role guards
+  users/
+    models.py             Raw-SQL user-row helpers
+    seed.py               Idempotent seed of the four demo users
+  pipeline/
+    orchestrator.py       ingest → extract → match → validate → decide
+    router.py             POST /extract, POST /process (clerk-only)
+  audit/
+    router.py             GET /audit/{invoice_number} (manager-only)
   db/
-    schema.sql            Postgres table definitions
+    schema.sql            Postgres tables (incl. users + tenant_id columns)
     connection.py         psycopg connection pool + schema apply
     seed.py               Seed vendors, POs + line items, policy_config
   extract/
-    api.py                FastAPI service (/extract, /process, /audit)
     ingest.py             Detect text vs image-only PDF
     text_extract.py       pdfplumber path
     vision_extract.py     PyMuPDF → base64 path
@@ -60,14 +71,18 @@ src/
     invoice_generator_v1.py  v1 synthetic PDFs (validation tests)
 validate_all.py           CLI harness — runs all 11 invoices, prints the matrix + verdicts
 docker-compose.yml        Local Postgres
+.env.example              Documented environment variables
 docs/
   MANUAL_TESTING.md       Step-by-step manual test guide
   QUERYING_THE_DB.md      How to inspect the database
 tests/
+  conftest.py             Shared fixtures (auth headers)
   test_extraction.py      Extraction schema + behaviour (live, needs API key)
   test_validation.py      Pure validation logic (no infra)
   test_governance.py      Postgres + governance integration (skip-if-down)
   test_decision.py        Decision engine — pure matrix + DB commit (skip-if-down)
+  test_auth.py            JWT issue/verify + login/me (login skips if DB down)
+  test_permissions.py     Route role-guard matrix (no infra)
 ```
 
 ## Setup
@@ -90,13 +105,20 @@ invoices:
 
 ```bash
 docker compose up -d                        # local Postgres
-python -m src.db.seed                        # schema + vendors, POs, policy
-python -m src.generate.invoice_generator     # v0 PDFs (extraction tests)
-python -m src.generate.invoice_generator_v1  # v1 PDFs (validation tests)
+python -m app.db.seed                        # schema + vendors, POs, policy
+python -m app.users.seed                     # four demo users (2 clerks, 2 managers)
+python -m app.generate.invoice_generator     # v0 PDFs (extraction tests)
+python -m app.generate.invoice_generator_v1  # v1 PDFs (validation tests)
 ```
 
+The API server also self-bootstraps on startup (apply schema → seed reference
+data → seed users), so `uvicorn app.main:app` works against an empty database
+with no extra steps; the commands above are for the CLI/test workflows.
+
 Override the database with `DATABASE_URL` (env or `.env`); it defaults to
-`postgresql://ap:ap@localhost:5432/ap_invoices`.
+`postgresql://ap:ap@localhost:5432/ap_invoices`. Copy **`.env.example`** to
+`.env` for the full list of variables — set `JWT_SECRET` (required when
+`ENVIRONMENT=production`; a dev fallback is used otherwise).
 
 > New here? See **[docs/MANUAL_TESTING.md](docs/MANUAL_TESTING.md)** for a
 > guided walkthrough and **[docs/QUERYING_THE_DB.md](docs/QUERYING_THE_DB.md)**
@@ -105,21 +127,46 @@ Override the database with `DATABASE_URL` (env or `.env`); it defaults to
 ## Running the API
 
 ```bash
-uvicorn src.extract.api:app --reload
+uvicorn app.main:app --reload
 ```
 
-| Endpoint | Purpose |
-|----------|---------|
-| `GET  /health` | Liveness + whether the API key is set |
-| `POST /extract` | PDF → structured extraction JSON only |
-| `POST /process` | PDF → full pipeline: extraction + validation evidence + **verdict** |
-| `GET  /audit/{invoice_number}` | Ordered governance trail + latest verdict |
+| Endpoint | Purpose | Role |
+|----------|---------|------|
+| `POST /auth/login` | Email + password → bearer JWT (1-hour expiry) | public |
+| `GET  /auth/me` | Current user (UI session bootstrap) | any |
+| `GET  /health` | Liveness + whether the API key is set | public |
+| `POST /extract` | PDF → structured extraction JSON only | clerk |
+| `POST /process` | PDF → full pipeline: extraction + validation + **verdict** | clerk |
+| `GET  /audit/{invoice_number}` | Governance trail + latest verdict | manager |
+
+### Authentication & roles
+
+Two roles: **clerk** (uploads/processes invoices) and **manager** (reviews,
+reads the audit trail). Protected routes require an `Authorization: Bearer
+<token>` header; a clerk hitting a manager route (or vice-versa) gets **403**, a
+missing/invalid token gets **401**. Four demo users are seeded — clerks
+`priya@acmecorp.com` / `rahul@acmecorp.com` (`demo-clerk-1` / `-2`), managers
+`anjali@acmecorp.com` / `vikram@acmecorp.com` (`demo-mgr-1` / `-2`).
 
 ```bash
+# 1) log in as a clerk → grab the token
+TOKEN=$(curl -s -X POST http://localhost:8000/auth/login \
+  -H 'Content-Type: application/json' \
+  -d '{"email":"priya@acmecorp.com","password":"demo-clerk-1"}' \
+  | python3 -c "import sys,json;print(json.load(sys.stdin)['access_token'])")
+
+# 2) clerk processes an invoice
 curl -s -X POST http://localhost:8000/process \
+  -H "Authorization: Bearer $TOKEN" \
   -F "file=@data/inputs/edge_4_dell_line_mismatch.pdf" | python3 -m json.tool
 
-curl -s http://localhost:8000/audit/DEL%2F2026%2F0419 | python3 -m json.tool
+# 3) manager reads the audit trail (clerk token here would 403)
+MGR=$(curl -s -X POST http://localhost:8000/auth/login \
+  -H 'Content-Type: application/json' \
+  -d '{"email":"anjali@acmecorp.com","password":"demo-mgr-1"}' \
+  | python3 -c "import sys,json;print(json.load(sys.stdin)['access_token'])")
+curl -s http://localhost:8000/audit/DEL%2F2026%2F0419 \
+  -H "Authorization: Bearer $MGR" | python3 -m json.tool
 ```
 
 `/process` returns `{run_id, extraction, validation, decision}`. Every run is
@@ -161,7 +208,7 @@ matching misses.
   if the rate can't be recovered, the check skips and validates at total level.
 - **Fuzzy matching** — vendor names tolerate legal suffixes ("India Pvt Ltd"),
   line descriptions tolerate abbreviations ("hrs" ≈ "hours"). Thresholds: 0.75
-  vendor, 0.80 line (`src/validate/matcher.py`).
+  vendor, 0.80 line (`app/validate/matcher.py`).
 - **Tolerance lives in data** — each PO carries its own `tolerance_pct`; nothing
   is hard-coded.
 
@@ -313,19 +360,22 @@ python validate_all.py --dry-run     # normals now FLAG (over_authority)
 ## Tests
 
 ```bash
+pytest                               # everything (skips DB/live tests when unavailable)
 pytest tests/test_validation.py -v   # pure validation logic, no infra
+pytest tests/test_permissions.py -v  # route role-guard matrix, no infra
+pytest tests/test_auth.py -v         # JWT (pure) + login/me (skips if DB down)
 pytest tests/test_decision.py -v     # decision matrix (pure) + commit (skips if DB down)
 pytest tests/test_governance.py -v   # Postgres integration (skips if DB down)
 pytest tests/test_extraction.py -v   # extraction (live-model tests skip w/o key)
 ```
 
-`test_validation.py` and the pure half of `test_decision.py` always run (they
-inject in-memory reference data). The DB-backed tests skip cleanly when Postgres
-is unreachable. Live-model extraction tests skip when `ANTHROPIC_API_KEY` is
-unset.
+`test_validation.py`, `test_permissions.py`, and the pure halves of
+`test_decision.py` / `test_auth.py` always run (in-memory data + synthetic
+tokens). The DB-backed tests skip cleanly when Postgres is unreachable.
+Live-model extraction tests skip when `ANTHROPIC_API_KEY` is unset.
 
 ## Stack
 
-Python 3.11+ · FastAPI + uvicorn · anthropic SDK (Sonnet, prompt caching) ·
-**Postgres + psycopg3** · rapidfuzz · pdfplumber · PyMuPDF + Pillow · reportlab ·
-pytest + httpx
+Python 3.11+ · FastAPI + uvicorn · **JWT auth (PyJWT + passlib/bcrypt, role-based
+guards)** · anthropic SDK (Sonnet, prompt caching) · **Postgres + psycopg3** ·
+rapidfuzz · pdfplumber · PyMuPDF + Pillow · reportlab · pytest + httpx

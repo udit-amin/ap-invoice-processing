@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import pytest
 
-from src.validate import checks, matcher
+from app.validate import checks, matcher
 
 # ---------------------------------------------------------------------------
 # Inline reference data (decoupled from Postgres so these tests need no infra)

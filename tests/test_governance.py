@@ -12,7 +12,7 @@ from fastapi.testclient import TestClient
 
 def _db_available() -> bool:
     try:
-        from src.db.connection import cursor
+        from app.db.connection import cursor
         with cursor() as cur:
             cur.execute("SELECT 1")
         return True
@@ -32,7 +32,7 @@ pytestmark = requires_db
 # --------------------------------------------------------------------------- #
 @pytest.fixture(scope="session", autouse=True)
 def _seed_once():
-    from src.db.seed import seed
+    from app.db.seed import seed
     seed()
     yield
 
@@ -40,7 +40,7 @@ def _seed_once():
 @pytest.fixture(autouse=True)
 def _clean_operational():
     """Truncate operational tables before each test; leave reference data."""
-    from src.db.connection import cursor
+    from app.db.connection import cursor
     with cursor() as cur:
         cur.execute(
             "TRUNCATE governance_events, validation_reports, invoices, "
@@ -51,7 +51,7 @@ def _clean_operational():
 
 @pytest.fixture
 def client():
-    from src.extract.api import app
+    from app.main import app
     return TestClient(app)
 
 
@@ -87,8 +87,8 @@ def _dell_normal():
 
 def _run_with_governance(extracted):
     """Mirror the pipeline's ingest/extract events + validate, returning run_id+report."""
-    from src.governance import recorder
-    from src.validate.validator import validate
+    from app.governance import recorder
+    from app.validate.validator import validate
     run_id = recorder.start_run(
         invoice_path="test.pdf",
         invoice_number=extracted.get("invoice_number"),
@@ -105,7 +105,7 @@ def _run_with_governance(extracted):
 # Loaders read reference data from Postgres
 # --------------------------------------------------------------------------- #
 def test_load_po_database_shape():
-    from src.validate.loader import load_po_database
+    from app.validate.loader import load_po_database
     po_db = load_po_database()
     assert "PO-5001" in po_db
     po = po_db["PO-5001"]
@@ -116,7 +116,7 @@ def test_load_po_database_shape():
 
 
 def test_load_vendor_registry_shape():
-    from src.validate.loader import load_vendor_registry
+    from app.validate.loader import load_vendor_registry
     reg = load_vendor_registry()
     by_id = {v["vendor_id"]: v for v in reg}
     assert by_id["V-001"]["approved"] is True
@@ -127,7 +127,7 @@ def test_load_vendor_registry_shape():
 # validate() against the live database
 # --------------------------------------------------------------------------- #
 def test_validate_full_report_passes_for_dell():
-    from src.validate.validator import validate
+    from app.validate.validator import validate
     report = validate(_dell_normal())
     by_name = {c["check"]: c for c in report["checks"]}
     assert set(by_name) == {"po_lookup", "vendor_approved", "po_status",
@@ -137,7 +137,7 @@ def test_validate_full_report_passes_for_dell():
 
 
 def test_po_not_found_short_circuits():
-    from src.validate.validator import validate
+    from app.validate.validator import validate
     extracted = _extracted("X/1", "Dell Technologies India Pvt Ltd", "PO-9999",
                            10000, [_line("Widget", 1, 10000)])
     report = validate(extracted)
@@ -150,7 +150,7 @@ def test_po_not_found_short_circuits():
 
 
 def test_no_verdict_field_anywhere():
-    from src.validate.validator import validate
+    from app.validate.validator import validate
     report = validate(_dell_normal())
 
     def _keys(obj):
@@ -170,7 +170,7 @@ def test_no_verdict_field_anywhere():
 # Race-proof duplicate detection
 # --------------------------------------------------------------------------- #
 def test_duplicate_flips_pass_to_fail():
-    from src.validate.validator import validate
+    from app.validate.validator import validate
     first = validate(_dell_normal())
     second = validate(_dell_normal())
     dup1 = next(c for c in first["checks"] if c["check"] == "duplicate")
@@ -183,7 +183,7 @@ def test_duplicate_flips_pass_to_fail():
 def test_duplicate_constraint_is_atomic():
     """Direct insert proves the UNIQUE constraint arbitrates, not app-level check."""
     import psycopg
-    from src.db.connection import cursor
+    from app.db.connection import cursor
     with cursor() as cur:
         cur.execute(
             "INSERT INTO invoices (invoice_number, vendor_name) VALUES (%s, %s)",
@@ -201,7 +201,7 @@ def test_duplicate_constraint_is_atomic():
 # Governance events persisted at every stage
 # --------------------------------------------------------------------------- #
 def test_governance_events_recorded_for_all_stages():
-    from src.db.connection import cursor
+    from app.db.connection import cursor
     run_id, _ = _run_with_governance(_dell_normal())
     with cursor() as cur:
         cur.execute(
@@ -212,7 +212,7 @@ def test_governance_events_recorded_for_all_stages():
 
 
 def test_validation_report_persisted():
-    from src.db.connection import cursor
+    from app.db.connection import cursor
     run_id, report = _run_with_governance(_dell_normal())
     with cursor() as cur:
         cur.execute(
@@ -228,9 +228,9 @@ def test_validation_report_persisted():
 # --------------------------------------------------------------------------- #
 # Audit REST endpoint
 # --------------------------------------------------------------------------- #
-def test_audit_endpoint_returns_trail(client):
+def test_audit_endpoint_returns_trail(client, auth_header):
     _run_with_governance(_dell_normal())
-    r = client.get("/audit/DEL/2026/0412")
+    r = client.get("/audit/DEL/2026/0412", headers=auth_header("manager"))
     assert r.status_code == 200
     body = r.json()
     assert body["invoice_number"] == "DEL/2026/0412"
@@ -240,6 +240,6 @@ def test_audit_endpoint_returns_trail(client):
     assert body["latest_report"] is not None
 
 
-def test_audit_endpoint_404_for_unknown_invoice(client):
-    r = client.get("/audit/NOPE-9999")
+def test_audit_endpoint_404_for_unknown_invoice(client, auth_header):
+    r = client.get("/audit/NOPE-9999", headers=auth_header("manager"))
     assert r.status_code == 404

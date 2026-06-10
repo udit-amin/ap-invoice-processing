@@ -27,14 +27,14 @@ import argparse
 import json
 import sys
 
-from src import config
-from src.db.connection import cursor
-from src.db import seed as _seed
-from src.governance import recorder
-from src.validate.validator import validate
-from src.decide import engine, commit
-from src.decide.policy import load_policy
-from src import pipeline
+from app import config
+from app.db.connection import cursor
+from app.db import seed as _seed
+from app.governance import recorder
+from app.validate.validator import validate
+from app.decide import engine, commit
+from app.decide.policy import load_policy
+from app import pipeline
 
 INVOICES = [
     "normal_1_dell.pdf",
@@ -180,7 +180,7 @@ def main():
         print("[harness] Operational state reset (runs/verdicts/events/reports).\n")
 
     if use_api:
-        from src.generate.invoice_generator_v1 import generate_missing
+        from app.generate.invoice_generator_v1 import generate_missing
         generate_missing()
 
     col_w = 34

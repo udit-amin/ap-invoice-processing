@@ -38,9 +38,15 @@ a table), `\x` (toggle expanded row output — useful for JSONB), `\q` (quit).
 | `validation_reports` | Full evidence report per run, as JSONB |
 | `governance_events` | Append-only audit trail: one+ row per stage |
 | `verdicts` | The decision per run: verdict, reason, drivers, `po_balance_after` |
+| `users` | Login accounts — email, role (`clerk`/`manager`), bcrypt hash |
 
 `vendors` / `purchase_orders` / `po_line_items` / `policy_config` are seeded
-reference data. The rest are written at runtime by the pipeline.
+reference data. `users` is seeded with the four demo accounts. The rest are
+written at runtime by the pipeline.
+
+`pipeline_runs`, `validation_reports`, `governance_events`, `verdicts`, and
+`policy_config` also carry a `tenant_id` column (a fixed UUID for now — see
+`app/config.py:TENANT_ID`); every row currently shares the same tenant.
 
 ---
 
@@ -226,11 +232,22 @@ The verdict and its PO balance decrement are written in one transaction, so a
 
 ---
 
+## Users
+
+```sql
+-- Demo accounts (no password hashes shown)
+SELECT email, name, role, last_login FROM users ORDER BY role, email;
+```
+
+`last_login` is updated on every successful `POST /auth/login`.
+
+---
+
 ## Resetting operational state
 
 Wipe runtime data but keep the seeded reference data — handy between manual test
 runs. (Reseed afterwards if you want APPROVE-decremented PO balances restored:
-`python -m src.db.seed`.)
+`python -m app.db.seed`.)
 
 ```sql
 TRUNCATE governance_events, validation_reports, verdicts, invoices, pipeline_runs
@@ -248,5 +265,5 @@ To reset *everything* including reference data, recreate the container and
 reseed:
 
 ```bash
-docker compose down -v && docker compose up -d && python -m src.db.seed
+docker compose down -v && docker compose up -d && python -m app.db.seed
 ```
