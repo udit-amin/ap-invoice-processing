@@ -38,9 +38,15 @@ a table), `\x` (toggle expanded row output — useful for JSONB), `\q` (quit).
 | `validation_reports` | Full evidence report per run, as JSONB |
 | `governance_events` | Append-only audit trail: one+ row per stage |
 | `verdicts` | The decision per run: verdict, reason, drivers, `po_balance_after` |
+| `users` | Login accounts — email, role (`clerk`/`manager`), bcrypt hash |
 
 `vendors` / `purchase_orders` / `po_line_items` / `policy_config` are seeded
-reference data. The rest are written at runtime by the pipeline.
+reference data. `users` is seeded with the four demo accounts. The rest are
+written at runtime by the pipeline.
+
+`pipeline_runs`, `validation_reports`, `governance_events`, `verdicts`, and
+`policy_config` also carry a `tenant_id` column (a fixed UUID for now — see
+`app/config.py:TENANT_ID`); every row currently shares the same tenant.
 
 ---
 
@@ -223,6 +229,17 @@ ORDER BY decided_at DESC;
 The verdict and its PO balance decrement are written in one transaction, so a
 `verdicts` row with a non-null `po_balance_after` always matches the PO's
 `remaining_balance` change.
+
+---
+
+## Users
+
+```sql
+-- Demo accounts (no password hashes shown)
+SELECT email, name, role, last_login FROM users ORDER BY role, email;
+```
+
+`last_login` is updated on every successful `POST /auth/login`.
 
 ---
 
