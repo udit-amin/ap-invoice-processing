@@ -8,8 +8,8 @@ from __future__ import annotations
 
 import pytest
 
-from src.decide import engine
-from src.decide.policy import Policy, APPROVE, FLAG, REJECT
+from app.decide import engine
+from app.decide.policy import Policy, APPROVE, FLAG, REJECT
 
 
 # --------------------------------------------------------------------------- #
@@ -157,7 +157,7 @@ def test_severity_override_promotes_tolerance_to_reject():
 # --------------------------------------------------------------------------- #
 def _db_available() -> bool:
     try:
-        from src.db.connection import cursor
+        from app.db.connection import cursor
         with cursor() as cur:
             cur.execute("SELECT 1")
         return True
@@ -171,8 +171,8 @@ requires_db = pytest.mark.skipif(not _db_available(),
 
 @pytest.fixture
 def _clean_db():
-    from src.db.connection import cursor
-    from src.db.seed import seed
+    from app.db.connection import cursor
+    from app.db.seed import seed
     seed()  # restores reference data incl. PO balances
     with cursor() as cur:
         cur.execute("TRUNCATE governance_events, validation_reports, verdicts, "
@@ -182,9 +182,9 @@ def _clean_db():
 
 @requires_db
 def test_approve_decrements_and_closes_po(_clean_db):
-    from src.db.connection import cursor
-    from src.decide import commit
-    from src.decide.policy import load_policy
+    from app.db.connection import cursor
+    from app.decide import commit
+    from app.decide.policy import load_policy
     rid = _run_id()
     verdict = engine.decide(_report(_PASS6), _extr(total=566400), load_policy())
     out = commit.commit_decision(verdict, "PO-5001", 566400, rid)
@@ -198,9 +198,9 @@ def test_approve_decrements_and_closes_po(_clean_db):
 
 @requires_db
 def test_commit_downgrades_on_insufficient_balance(_clean_db):
-    from src.db.connection import cursor
-    from src.decide import commit
-    from src.decide.policy import load_policy
+    from app.db.connection import cursor
+    from app.decide import commit
+    from app.decide.policy import load_policy
     # Simulate a concurrent draw-down: PO-5001 already emptied.
     with cursor() as cur:
         cur.execute("UPDATE purchase_orders SET remaining_balance=0, status='open' WHERE po_id='PO-5001'")
@@ -217,9 +217,9 @@ def test_commit_downgrades_on_insufficient_balance(_clean_db):
 
 @requires_db
 def test_verdict_persisted_and_on_audit(_clean_db):
-    from src.decide import commit
-    from src.decide.policy import load_policy
-    from src.governance import recorder
+    from app.decide import commit
+    from app.decide.policy import load_policy
+    from app.governance import recorder
     rid = recorder.start_run(invoice_number="DEL/2026/0412", vendor_name="Dell")
     verdict = engine.decide(_report(_PASS6, inv="DEL/2026/0412"),
                             _extr(inv="DEL/2026/0412"), load_policy())
@@ -231,5 +231,5 @@ def test_verdict_persisted_and_on_audit(_clean_db):
 
 
 def _run_id():
-    from src.governance import recorder
+    from app.governance import recorder
     return recorder.start_run(invoice_number="INV-1", vendor_name="Dell")

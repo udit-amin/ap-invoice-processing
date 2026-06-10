@@ -230,7 +230,7 @@ The verdict and its PO balance decrement are written in one transaction, so a
 
 Wipe runtime data but keep the seeded reference data — handy between manual test
 runs. (Reseed afterwards if you want APPROVE-decremented PO balances restored:
-`python -m src.db.seed`.)
+`python -m app.db.seed`.)
 
 ```sql
 TRUNCATE governance_events, validation_reports, verdicts, invoices, pipeline_runs
@@ -248,5 +248,5 @@ To reset *everything* including reference data, recreate the container and
 reseed:
 
 ```bash
-docker compose down -v && docker compose up -d && python -m src.db.seed
+docker compose down -v && docker compose up -d && python -m app.db.seed
 ```

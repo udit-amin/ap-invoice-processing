@@ -12,11 +12,11 @@ from __future__ import annotations
 import pytest
 from fastapi.testclient import TestClient
 
-from src import config
-from src.extract.api import app
-from src.extract import ingest
-from src.extract.extractor import extract, normalize
-from src.generate.invoice_generator import build_specs, generate_all
+from app import config
+from app.main import app
+from app.extract import ingest
+from app.extract.extractor import extract, normalize
+from app.generate.invoice_generator import build_specs, generate_all
 
 NORMALS = [f"normal_0{i}.pdf" for i in range(1, 6)]
 EDGES   = ["edge_scanned.pdf", "edge_bundled.pdf", "edge_embedded_tax.pdf"]
@@ -92,27 +92,33 @@ def test_health(api_client):
     assert "api_key_set" in body
 
 
-def test_extract_rejects_non_pdf(api_client):
+def test_extract_rejects_non_pdf(api_client, auth_header):
     r = api_client.post(
         "/extract",
         files={"file": ("invoice.txt", b"not a pdf", "text/plain")},
+        headers=auth_header("clerk"),
     )
     assert r.status_code == 422
 
 
-def test_extract_rejects_empty_file(api_client):
+def test_extract_rejects_empty_file(api_client, auth_header):
     r = api_client.post(
         "/extract",
         files={"file": ("empty.pdf", b"", "application/pdf")},
+        headers=auth_header("clerk"),
     )
     assert r.status_code == 422
 
 
 @requires_api
-def test_extract_endpoint_returns_schema(api_client):
+def test_extract_endpoint_returns_schema(api_client, auth_header):
     path = config.INPUTS_DIR / "normal_01.pdf"
     with open(path, "rb") as f:
-        r = api_client.post("/extract", files={"file": ("normal_01.pdf", f, "application/pdf")})
+        r = api_client.post(
+            "/extract",
+            files={"file": ("normal_01.pdf", f, "application/pdf")},
+            headers=auth_header("clerk"),
+        )
     assert r.status_code == 200
     _assert_schema(r.json())
 

@@ -15,7 +15,7 @@ venv/
 # Editor / tooling
 .claude/
 
-# Generated data (PDFs are regenerated from src/generate/)
+# Generated data (PDFs are regenerated from app/generate/)
 data/inputs/*.pdf
 
 # Stray SQLite artifacts — the pipeline uses Postgres; *.db should never be committed

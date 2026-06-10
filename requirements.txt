@@ -10,3 +10,6 @@ pytest>=8.0.0
 httpx2>=0.28.0
 rapidfuzz>=3.0.0
 psycopg[binary,pool]>=3.1
+PyJWT>=2.8.0
+passlib[bcrypt]>=1.7.4
+bcrypt<4.1                     # passlib 1.7.4 reads bcrypt.__about__ (removed in 4.1)

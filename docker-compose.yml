@@ -1,7 +1,7 @@
 # Local Postgres for the AP invoice pipeline.
 #
 #   docker compose up -d
-#   python -m src.db.seed        # apply schema + seed reference data
+#   python -m app.db.seed        # apply schema + seed reference data
 #
 # The DSN matches config.get_database_url()'s default; override with
 # DATABASE_URL in the environment or .env to point elsewhere.

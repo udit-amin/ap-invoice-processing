@@ -21,14 +21,14 @@ pip install -r requirements.txt
 docker compose up -d
 
 # Apply schema + seed reference data (vendors, POs + line items, policy)
-python -m src.db.seed
+python -m app.db.seed
 
 # Generate the synthetic test invoices
-python -m src.generate.invoice_generator       # v0 set (extraction tests)
-python -m src.generate.invoice_generator_v1    # v1 set (validation tests)
+python -m app.generate.invoice_generator       # v0 set (extraction tests)
+python -m app.generate.invoice_generator_v1    # v1 set (validation tests)
 ```
 
-`python -m src.db.seed` prints a summary; expect **11 vendors (10 approved), 10
+`python -m app.db.seed` prints a summary; expect **11 vendors (10 approved), 10
 purchase orders (1 closed), 16 line items, 1 policy row**. (The `edge_5`/`edge_6`
 PDFs ship in `data/inputs/`; they aren't produced by the generators.)
 
@@ -134,7 +134,7 @@ docker exec ap_invoices_db psql -U ap -d ap_invoices \
 Dell invoice live — it APPROVEs and draws PO-5001 to zero, closing it:
 
 ```bash
-python -m src.db.seed     # restore PO-5001 balance to 566400/open
+python -m app.db.seed     # restore PO-5001 balance to 566400/open
 curl -s -X POST localhost:8000/process -F file=@data/inputs/normal_1_dell.pdf \
   | python3 -c "import sys,json; d=json.load(sys.stdin)['decision']; print(d['verdict'], d['po_balance_after'])"
 # → APPROVE 0.0
@@ -154,7 +154,7 @@ FLAG inside the commit lock, never over-drawing) is covered deterministically by
 Start the server in one terminal:
 
 ```bash
-uvicorn src.extract.api:app --reload
+uvicorn app.main:app --reload
 ```
 
 Interactive docs are at <http://localhost:8000/docs>. In another terminal:
@@ -195,7 +195,7 @@ What to verify:
 
 | What you did | Expected result |
 |--------------|-----------------|
-| `python -m src.db.seed` | 11 vendors / 10 POs / 16 lines / 1 policy |
+| `python -m app.db.seed` | 11 vendors / 10 POs / 16 lines / 1 policy |
 | `pytest tests/test_validation.py` | all pass, no infra needed |
 | `pytest tests/test_decision.py` (DB up) | all pass (pure + commit) |
 | `pytest tests/test_decision.py` (DB down) | pure pass, commit tests skipped |
