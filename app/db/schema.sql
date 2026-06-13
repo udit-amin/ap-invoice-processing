@@ -165,3 +165,39 @@ ALTER TABLE validation_reports ADD COLUMN IF NOT EXISTS tenant_id UUID NOT NULL 
 ALTER TABLE governance_events  ADD COLUMN IF NOT EXISTS tenant_id UUID NOT NULL DEFAULT '11fbb063-9253-5c06-8412-f2aa4bb88084';
 ALTER TABLE verdicts           ADD COLUMN IF NOT EXISTS tenant_id UUID NOT NULL DEFAULT '11fbb063-9253-5c06-8412-f2aa4bb88084';
 ALTER TABLE policy_config      ADD COLUMN IF NOT EXISTS tenant_id UUID NOT NULL DEFAULT '11fbb063-9253-5c06-8412-f2aa4bb88084';
+
+-- --------------------------------------------------------------------------
+-- Actor identity + human review (v3, PR2)
+-- --------------------------------------------------------------------------
+-- Who did what. PR1's guards enforce *who may call* a route; these columns
+-- record *who did*. action_type classifies the event so the trail is filterable:
+--   pipeline_run | review_approve | review_reject | review_escalate | policy_change
+ALTER TABLE governance_events ADD COLUMN IF NOT EXISTS actor_user_id UUID;
+ALTER TABLE governance_events ADD COLUMN IF NOT EXISTS actor_role    TEXT;
+ALTER TABLE governance_events ADD COLUMN IF NOT EXISTS action_type   TEXT;
+
+-- Run creator, so a clerk can be shown only their own runs (managers see all).
+ALTER TABLE pipeline_runs ADD COLUMN IF NOT EXISTS actor_user_id UUID;
+ALTER TABLE pipeline_runs ADD COLUMN IF NOT EXISTS actor_role    TEXT;
+
+-- Let the effectful review-approve path re-find the PO + total to draw down,
+-- without re-extracting the PDF. Written by commit_decision at decision time.
+ALTER TABLE verdicts ADD COLUMN IF NOT EXISTS invoice_total NUMERIC(14, 2);
+ALTER TABLE verdicts ADD COLUMN IF NOT EXISTS matched_po_id TEXT;
+
+-- Human review actions on flagged runs. An 'approve' may draw the PO down
+-- (po_balance_after non-null); 'reject'/'escalate' are record-only.
+CREATE TABLE IF NOT EXISTS review_actions (
+    review_id        BIGSERIAL PRIMARY KEY,
+    run_id           UUID REFERENCES pipeline_runs (run_id),
+    invoice_number   TEXT,
+    action           TEXT NOT NULL CHECK (action IN ('approve', 'reject', 'escalate')),
+    note             TEXT,
+    actor_user_id    UUID,
+    actor_role       TEXT,
+    po_balance_after NUMERIC(14, 2),
+    created_at       TIMESTAMPTZ NOT NULL DEFAULT now(),
+    tenant_id        UUID NOT NULL DEFAULT '11fbb063-9253-5c06-8412-f2aa4bb88084'
+);
+CREATE INDEX IF NOT EXISTS idx_review_actions_run ON review_actions (run_id);
+CREATE INDEX IF NOT EXISTS idx_review_actions_invoice ON review_actions (invoice_number);

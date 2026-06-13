@@ -48,10 +48,18 @@ def create_app() -> FastAPI:
     from app.auth.router import router as auth_router
     from app.audit.router import router as audit_router
     from app.pipeline.router import router as pipeline_router
+    from app.invoices.router import router as invoices_router
+    from app.review.router import router as review_router
+    from app.dashboard.router import router as dashboard_router
+    from app.policy.router import router as policy_router
 
     app.include_router(auth_router)
     app.include_router(pipeline_router)
+    app.include_router(invoices_router)
+    app.include_router(review_router)
+    app.include_router(dashboard_router)
     app.include_router(audit_router)
+    app.include_router(policy_router)
 
     @app.get("/health", tags=["meta"])
     def health():

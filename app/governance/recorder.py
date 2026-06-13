@@ -37,17 +37,33 @@ WARN  = "warn"
 ERROR = "error"
 
 
+def actor_fields(actor: Any | None) -> tuple[str, str | None, str | None]:
+    """Normalise an acting user into ``(label, user_id, role)`` for stamping.
+
+    ``actor`` is duck-typed (anything with ``name``/``email``/``user_id``/``role``,
+    e.g. an ``auth.dependencies.CurrentUser``) so this module stays free of any
+    auth import. ``None`` → the system actor (background pipeline, harness)."""
+    if actor is None:
+        return "system", None, None
+    label = getattr(actor, "name", None) or getattr(actor, "email", None) or "system"
+    return label, getattr(actor, "user_id", None), getattr(actor, "role", None)
+
+
 def start_run(
     invoice_path: str = "",
     invoice_number: str | None = None,
     vendor_name: str | None = None,
     po_reference: str | None = None,
     source_type: str | None = None,
+    actor_user_id: str | None = None,
+    actor_role: str | None = None,
 ) -> str:
     """Create a pipeline_runs row and return its run_id (UUID string).
 
     Best-effort: returns a fresh UUID even if the insert fails, so the caller
     always has a correlation id to thread through the rest of the run.
+    `actor_user_id`/`actor_role` record the creator so a clerk can later be
+    shown only their own runs (managers see all).
     """
     run_id = str(uuid.uuid4())
     try:
@@ -55,10 +71,10 @@ def start_run(
             cur.execute(
                 """INSERT INTO pipeline_runs
                    (run_id, invoice_number, vendor_name, po_reference,
-                    source_type, invoice_path)
-                   VALUES (%s, %s, %s, %s, %s, %s)""",
+                    source_type, invoice_path, actor_user_id, actor_role)
+                   VALUES (%s, %s, %s, %s, %s, %s, %s, %s)""",
                 (run_id, invoice_number, vendor_name, po_reference,
-                 source_type, invoice_path),
+                 source_type, invoice_path, actor_user_id, actor_role),
             )
     except Exception as exc:  # noqa: BLE001 — audit must not break the pipeline
         log.warning("governance start_run failed: %s", exc)
@@ -71,18 +87,26 @@ def log_event(
     status: str,
     detail: dict[str, Any] | None = None,
     actor: str = "system",
+    actor_user_id: str | None = None,
+    actor_role: str | None = None,
+    action_type: str | None = None,
 ) -> None:
-    """Append one governance event. Best-effort — never raises."""
-    if run_id is None:
-        return
+    """Append one governance event. Best-effort — never raises.
+
+    `actor` stays a free-text label (defaults to "system"); the typed
+    `actor_user_id`/`actor_role`/`action_type` columns let the trail record who
+    did what and classify the event (pipeline_run, review_*, policy_change).
+    """
     try:
         with cursor() as cur:
             cur.execute(
                 """INSERT INTO governance_events
-                   (run_id, stage, status, detail, actor)
-                   VALUES (%s, %s, %s, %s, %s)""",
+                   (run_id, stage, status, detail, actor,
+                    actor_user_id, actor_role, action_type)
+                   VALUES (%s, %s, %s, %s, %s, %s, %s, %s)""",
                 (run_id, stage, status,
-                 Jsonb(detail) if detail is not None else None, actor),
+                 Jsonb(detail) if detail is not None else None, actor,
+                 actor_user_id, actor_role, action_type),
             )
     except Exception as exc:  # noqa: BLE001
         log.warning("governance log_event(%s/%s) failed: %s", stage, status, exc)
@@ -185,7 +209,8 @@ def fetch_audit_trail(invoice_number: str) -> dict[str, Any]:
         for (run_id, source_type, invoice_path, overall_conf,
              started_at, finished_at) in run_rows:
             cur.execute(
-                """SELECT stage, status, detail, actor, created_at
+                """SELECT stage, status, detail, actor, actor_user_id,
+                          actor_role, action_type, created_at
                    FROM governance_events
                    WHERE run_id = %s
                    ORDER BY event_id""",
@@ -195,9 +220,13 @@ def fetch_audit_trail(invoice_number: str) -> dict[str, Any]:
                 {
                     "stage": stage, "status": status, "detail": detail,
                     "actor": actor,
+                    "actor_user_id": str(actor_user_id) if actor_user_id else None,
+                    "actor_role": actor_role,
+                    "action_type": action_type,
                     "ts": created_at.isoformat() if created_at else None,
                 }
-                for (stage, status, detail, actor, created_at) in cur.fetchall()
+                for (stage, status, detail, actor, actor_user_id,
+                     actor_role, action_type, created_at) in cur.fetchall()
             ]
             runs.append({
                 "run_id": str(run_id),

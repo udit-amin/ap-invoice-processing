@@ -243,3 +243,45 @@ def test_audit_endpoint_returns_trail(client, auth_header):
 def test_audit_endpoint_404_for_unknown_invoice(client, auth_header):
     r = client.get("/audit/NOPE-9999", headers=auth_header("manager"))
     assert r.status_code == 404
+
+
+# --------------------------------------------------------------------------- #
+# Actor identity on the trail (PR2): who ran the pipeline
+# --------------------------------------------------------------------------- #
+class _Actor:
+    user_id = "12121212-0000-0000-0000-000000000001"
+    role = "clerk"
+    name = "Priya Nair"
+    email = "priya@acmecorp.com"
+
+
+def test_audit_trail_records_actor(client, auth_header):
+    from app.decide import commit, engine
+    from app.decide.policy import load_policy
+    from app.governance import recorder
+
+    run_id = recorder.start_run(invoice_number="DEL/2026/0412", vendor_name="Dell",
+                                actor_user_id=_Actor.user_id, actor_role=_Actor.role)
+    recorder.log_event(run_id, recorder.INGEST, recorder.OK, {"x": 1},
+                       actor=_Actor.name, actor_user_id=_Actor.user_id,
+                       actor_role=_Actor.role, action_type="pipeline_run")
+    verdict = engine.decide(
+        {"invoice_number": "DEL/2026/0412", "po_reference": "PO-5001",
+         "matched_po": "PO-5001", "po_balance": 566400,
+         "checks": [{"check": c, "status": "pass", "reason": ""} for c in
+                    ("po_lookup", "vendor_approved", "po_status",
+                     "total_tolerance", "line_reconciliation", "duplicate")]},
+        {"invoice_number": "DEL/2026/0412", "vendor_name": "Dell",
+         "po_reference": "PO-5001", "total": 566400,
+         "extraction_confidence": {"overall": 0.95}},
+        load_policy())
+    commit.commit_decision(verdict, "PO-5001", 566400, run_id, actor=_Actor)
+
+    body = client.get("/audit/DEL/2026/0412", headers=auth_header("manager")).json()
+    events = body["runs"][0]["events"]
+    ingest = next(e for e in events if e["stage"] == "ingest")
+    decision = next(e for e in events if e["stage"] == "decision")
+    assert ingest["actor_user_id"] == _Actor.user_id
+    assert ingest["action_type"] == "pipeline_run"
+    assert decision["actor_role"] == "clerk"
+    assert decision["action_type"] == "pipeline_run"
