@@ -133,12 +133,22 @@ Response `200`:
     "po_balance_after": null,
     "policy_version": "2026.06.1",
     "decided_at": "2026-06-10T14:00:00+00:00"
-  }
+  },
+  "events": [
+    { "stage": "ingest",   "status": "ok",   "actor": "Priya Nair", "ts": "…" },
+    { "stage": "extract",  "status": "ok",   "detail": { "source_type": "text" }, "ts": "…" },
+    { "stage": "match",    "status": "ok",   "detail": { "check": "po_lookup" }, "ts": "…" },
+    { "stage": "validate", "status": "fail", "detail": { "check": "line_reconciliation" }, "ts": "…" },
+    { "stage": "decision", "status": "warn", "ts": "…" }
+  ]
 }
 ```
 
 `po_balance_after` is non-null only on APPROVE (the PO was drawn down).
-Re-processing the same invoice returns **REJECT (duplicate)** by design.
+Re-processing the same invoice returns **REJECT (duplicate)** by design. The
+`events` array is the run's ordered governance trail (added in v4) so a UI can
+replay the real stages in a single call; the original PDF and full extraction
+are also persisted (see `GET /review/{run_id}/file`).
 
 ```bash
 curl -s -X POST http://localhost:8000/invoices/process \
@@ -170,6 +180,8 @@ Response `200`:
       "po_reference": "PO-5009",
       "verdict": "FLAG",
       "requires_human_review": true,
+      "invoice_total": 802400.0,
+      "overall_conf": 0.95,
       "po_balance_after": null,
       "actor_user_id": "…",
       "actor_role": "clerk",
@@ -267,6 +279,31 @@ curl -s -X POST "http://localhost:8000/review/$RUN_ID/action" \
   -d '{"action":"approve","note":"confirmed bundle pricing"}' | python3 -m json.tool
 ```
 
+### `GET /review/{run_id}` · clerk · manager
+
+Full context for working a flagged run (the queue is global, so either role may
+open any item — unlike the owner-scoped `/invoices/runs/{run_id}`). Powers the
+three flag-type review views. **404** if the run has no verdict.
+
+Returns the verdict (`verdict`, `reason`, `drivers`, `review_payload`,
+`confidence_overall`, `policy_version`, `invoice_total`,
+`auto_approve_ceiling_applied`), the persisted `extraction` (fields + per-field
+confidence), the six `checks`, the per-line `line_reconciliation` side-by-side,
+and `has_file`.
+
+```bash
+curl -s http://localhost:8000/review/$RUN_ID -H "Authorization: Bearer $MGR" | python3 -m json.tool
+```
+
+### `GET /review/{run_id}/file` · clerk · manager
+
+Streams the original uploaded PDF (`application/pdf`) so the low-confidence view
+can show the source scan. **404** if no file was stored for the run.
+
+```bash
+curl -s http://localhost:8000/review/$RUN_ID/file -H "Authorization: Bearer $MGR" -o invoice.pdf
+```
+
 ---
 
 ## Dashboard (manager — 403 for clerk)
@@ -304,6 +341,37 @@ default 30).
 
 ```bash
 curl -s "http://localhost:8000/dashboard/trends?days=7" -H "Authorization: Bearer $MGR" | python3 -m json.tool
+```
+
+### `GET /dashboard/kpis` · manager
+
+Headline KPIs over the last `days` days (query param `days`, 1–365, default 30),
+each with a delta vs the prior equal-length period (`null` where no prior data).
+All computed server-side. Quality KPIs (false-approve / override) are
+deliberately omitted — they need a downstream ground-truth signal — so the UI
+shows an honest placeholder rather than a fabricated number.
+
+```json
+{
+  "as_of": "2026-06-14T00:00:00+00:00",
+  "window_days": 30,
+  "totals": { "verdicts": 11, "approve": 6, "flag": 3, "reject": 2 },
+  "kpis": {
+    "stp_rate": { "value": 0.5454, "delta": null },
+    "avg_cycle_ms": { "value": 4.6, "delta": null },
+    "avg_time_in_queue_sec": { "value": 420.0, "delta": null },
+    "touchless_savings": { "value": 4380.0, "delta": 4380.0 },
+    "duplicate_spend_prevented": { "value": 0.0, "count": 0, "delta": 0.0 },
+    "audit_completeness": { "value": 1.0, "delta": null }
+  },
+  "flags_by_reason": { "line_variance": 1, "over_authority": 1, "low_confidence": 1 },
+  "rejections_by_reason": { "closed_po": 1, "unapproved_vendor": 1, "po_not_found": 1 },
+  "costs": { "manual_cost_per_invoice": 900.0, "auto_cost_per_invoice": 170.0 }
+}
+```
+
+```bash
+curl -s http://localhost:8000/dashboard/kpis -H "Authorization: Bearer $MGR" | python3 -m json.tool
 ```
 
 ---

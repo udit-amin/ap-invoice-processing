@@ -5,6 +5,44 @@ All notable changes to this project are documented here. The format follows
 labelled milestones (`v1`, `v2`, `v3.x`) rather than on a fixed release cadence;
 each PR adds an entry.
 
+## [v4] — Streamlit UI + dashboard KPIs
+
+The operational surface: a thin Streamlit client over the v3 API (login, live run
+view, review queue, manager dashboard, policy editor) plus the small backend
+additions it needs. No business logic in the UI — it calls endpoints and renders.
+
+### Added
+- **`ui/` Streamlit app** — login gate + role-driven `st.navigation` (clerks see
+  Run view + Review queue; managers see Review queue + Dashboard + Policy). One
+  `api_client` wraps every endpoint and owns the human-label translation layer;
+  `session` keeps the token across reruns. The run view replays the real
+  governance events as a live stage tracker; the review queue renders a distinct
+  view per flag type (line-variance side-by-side, over-ceiling amount, low-
+  confidence scan + flagged fields); the dashboard shows six KPI cards, flag/
+  rejection breakdowns, a trend chart, and a runs table with an audit drill-in.
+- **`GET /dashboard/kpis`** (manager) — STP rate, avg cycle time, avg time-in-
+  queue, touchless savings, duplicate spend prevented, audit completeness, and
+  flags/rejections-by-reason, each with a prior-period delta, in one payload.
+  Quality KPIs (false-approve / override) are deliberately omitted, not faked.
+- **`GET /review/{run_id}`** and **`GET /review/{run_id}/file`** — full review
+  context (drivers, review payload, extraction, per-line side-by-side) and the
+  stored original PDF, powering the three flag-type review views (either role).
+- `manual_cost_per_invoice` / `auto_cost_per_invoice` on `policy_config`
+  (₹900 / ₹170) for touchless savings; `pipeline_runs.extraction` JSONB + an
+  `invoice_files` (BYTEA) table persisting each upload, so the review UI can show
+  extracted fields and the source scan after the fact.
+- `scripts/seed_demo_history.py` — back-dated runs (with stored files/extraction)
+  so the dashboard isn't empty in a demo. New tests: `test_pipeline_events`,
+  `test_ui_labels`, plus KPI / review-detail / runs-amount coverage.
+
+### Changed
+- **`POST /invoices/process` now returns the `events` array** (the run's ordered
+  governance trail) so the UI replays the real stages in a single call.
+- **`GET /invoices/runs`** list items now include `invoice_total` and
+  `overall_conf` for the dashboard runs table.
+- The deterministic decision path is untouched — verdicts stay reproducible
+  (the 11-fixture matrix is still 6 APPROVE / 3 FLAG / 2 REJECT).
+
 ## [v3.2] — Endpoints + audit actor identity
 
 The working API surface a UI needs, and a trail that records *who did what*.

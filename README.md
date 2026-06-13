@@ -46,11 +46,11 @@ app/
     router.py             GET /invoices/runs, GET /invoices/runs/{run_id}
     models.py             Tenant-scoped run list/detail (clerk = own, manager = all)
   review/
-    router.py             GET /review/queue, POST /review/{run_id}/action
-    service.py            Effectful approve (PO draw-down) / reject / escalate
+    router.py             GET /review/queue + /{run_id} + /{run_id}/file, POST /review/{run_id}/action
+    service.py            Effectful approve (PO draw-down) / reject / escalate; review-detail read
   dashboard/
-    router.py             GET /dashboard/summary, /trends (manager-only)
-    models.py             Verdict-mix + daily-trend aggregates
+    router.py             GET /dashboard/summary, /trends, /kpis (manager-only)
+    models.py             Verdict-mix + daily-trend aggregates + headline KPIs
   policy/
     router.py             GET /policy, PUT /policy (manager-only)
     service.py            Validate + version-bump + audit policy edits
@@ -81,10 +81,18 @@ app/
   generate/
     invoice_generator.py     v0 synthetic PDFs (extraction tests)
     invoice_generator_v1.py  v1 synthetic PDFs (validation tests)
+ui/                       Streamlit front end (v4) — thin client over the API
+  app.py                  Login gate + role-driven st.navigation + sidebar
+  api_client.py           One fn per endpoint + bearer + human-label translation
+  session.py              Token + current user in st.session_state
+  views/                  run_view, review_queue, dashboard, policy (one render() each)
+  components/             decision_card, stage_tracker, invoice_detail
 validate_all.py           CLI harness — runs all 11 invoices, prints the matrix + verdicts
+scripts/
+  seed_demo_history.py    Back-dated runs (+ stored files) so the dashboard isn't empty
 docker-compose.yml        Local Postgres
 .env.example              Documented environment variables
-CHANGELOG.md              Version history (v1 → v3.2)
+CHANGELOG.md              Version history (v1 → v4)
 CLAUDE.md                 Repo guide + invariants for contributors / AI agents
 docs/
   API.md                  Detailed per-endpoint usage reference (curl + shapes)
@@ -100,7 +108,9 @@ tests/
   test_permissions.py     Route role-guard matrix (no infra)
   test_invoices.py        Run list/detail scoping (skip-if-down)
   test_review.py          Review queue + effectful approve/reject/escalate (skip-if-down)
-  test_dashboard.py       Dashboard aggregates + clerk 403 (skip-if-down)
+  test_dashboard.py       Dashboard aggregates + KPIs + clerk 403 (skip-if-down)
+  test_pipeline_events.py /invoices/process events + file/extraction persistence (skip-if-down)
+  test_ui_labels.py       UI translation layer (stage mapping + label maps; no infra)
   test_policy.py          Live policy edit flips next verdict (skip-if-down)
 ```
 
@@ -159,9 +169,12 @@ uvicorn app.main:app --reload
 | `GET  /invoices/runs` | List processed runs (clerk → own, manager → all; `?verdict=`) | clerk · manager |
 | `GET  /invoices/runs/{run_id}` | One run's detail (run + verdict + events) | clerk · manager |
 | `GET  /review/queue` | Flagged runs awaiting a human decision | clerk · manager |
+| `GET  /review/{run_id}` | Flagged-run review context (drivers, fields, line side-by-side) | clerk · manager |
+| `GET  /review/{run_id}/file` | The original uploaded PDF (for the low-confidence scan view) | clerk · manager |
 | `POST /review/{run_id}/action` | `approve` (draws PO down) / `reject` / `escalate` | clerk · manager |
 | `GET  /dashboard/summary` | Verdict mix, review backlog, totals | manager |
 | `GET  /dashboard/trends` | Per-day verdict counts (`?days=`) | manager |
+| `GET  /dashboard/kpis` | Headline KPIs + flag/rejection breakdowns (`?days=`) | manager |
 | `GET  /policy` | Current governance policy | manager |
 | `PUT  /policy` | Edit ceiling / confidence / severity map (audited) | manager |
 | `GET  /audit/{invoice_number}` | Governance trail + latest verdict (incl. actor) | manager |
@@ -205,12 +218,42 @@ curl -s -X POST "http://localhost:8000/review/$RUN/action" \
 curl -s http://localhost:8000/dashboard/summary -H "Authorization: Bearer $MGR" | python3 -m json.tool
 ```
 
-`/invoices/process` returns `{run_id, extraction, validation, decision}`. Every
-run and review action is recorded to the append-only governance trail in Postgres
-(`pipeline_runs`, `governance_events`, `validation_reports`, `verdicts`,
+`/invoices/process` returns `{run_id, extraction, validation, decision, events}`.
+Every run and review action is recorded to the append-only governance trail in
+Postgres (`pipeline_runs`, `governance_events`, `validation_reports`, `verdicts`,
 `review_actions`), each stamped with the acting user (`actor_user_id`,
 `actor_role`, `action_type`). Audit writes are best-effort — a logging failure
 never breaks the response.
+
+## The UI (v4)
+
+A Streamlit front end in `ui/` — a **thin client** over the API (it calls
+endpoints and renders; no verdict/tolerance logic lives in the UI). Run it
+alongside the API:
+
+```bash
+# API on :8000 (see above), then in another shell:
+API_BASE_URL=http://localhost:8000 .venv/bin/streamlit run ui/app.py
+# optional: pre-load a few days of history so the dashboard isn't empty
+.venv/bin/python scripts/seed_demo_history.py
+```
+
+`API_BASE_URL` (default `http://localhost:8000`) is the only deployment knob —
+point it at the AWS backend to run the same UI against production. Log in as any
+seeded user; the sidebar shows only the pages your role can use:
+
+| Page | clerk | manager | What it does |
+|------|:---:|:---:|------|
+| **Run view** | ✅ | — | Upload a PDF → the seven stages light up from the **real** governance events → decision card + "what the system saw" |
+| **Review queue** | ✅ | ✅ | Flagged items (oldest-first) with a distinct view per flag type: line-variance side-by-side, over-ceiling amount, low-confidence scan + flagged fields → approve / reject / escalate |
+| **Dashboard** | — | ✅ | Six KPI cards, flag/rejection breakdowns, a 30-day trend, and a filterable runs table with an audit drill-in |
+| **Policy** | — | ✅ | Edit the auto-approve ceiling / confidence gate live (a subsequent fresh run reflects it) |
+
+The run view's stage replay paces the **real** events the backend emitted (the
+pipeline itself runs in well under a second) — no timings or statuses are
+invented. Quality KPIs (false-approve / override) are shown as an honest
+"coming soon" placeholder rather than fabricated, since they need a downstream
+ground-truth signal.
 
 ## The validation checks
 
