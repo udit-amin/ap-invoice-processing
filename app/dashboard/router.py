@@ -22,3 +22,12 @@ def trends(
 ):
     """Per-day verdict counts over the last `days` days."""
     return models.trends(days)
+
+
+@router.get("/kpis")
+def kpis(
+    days: int = Query(default=30, ge=1, le=365),
+    user: CurrentUser = Depends(require_role("manager")),
+):
+    """Headline KPIs + flag/rejection breakdowns in one payload (handover §6)."""
+    return models.kpis(days)

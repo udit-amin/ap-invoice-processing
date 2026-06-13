@@ -82,12 +82,15 @@ PURCHASE_ORDERS = [
 ]
 
 # (id, auto_approve_ceiling, default_tolerance_pct, confidence_threshold,
-#  min_confidence, policy_version, severity_overrides)
+#  min_confidence, policy_version, severity_overrides,
+#  manual_cost_per_invoice, auto_cost_per_invoice)
 # Ceiling 750000 so the five normals auto-approve and edge_2 (₹8.02L) trips
 # authority review. min_confidence 0.75 is the decision-engine confidence gate.
+# Manual/auto per-invoice costs (₹900 ≈ $11, ₹170 ≈ $2) drive the touchless-
+# savings KPI (handover §6.5); governance-as-data, editable with no redeploy.
 POLICY = (
     1, 750000.0, 5.0, float(config.CONFIDENCE_THRESHOLD),
-    0.75, "2026.06.1", "{}",
+    0.75, "2026.06.1", "{}", 900.0, 170.0,
 )
 
 
@@ -128,15 +131,18 @@ def seed() -> None:
         cur.execute(
             """INSERT INTO policy_config
                (id, auto_approve_ceiling, default_tolerance_pct, confidence_threshold,
-                min_confidence, policy_version, severity_overrides)
-               VALUES (%s, %s, %s, %s, %s, %s, %s)
+                min_confidence, policy_version, severity_overrides,
+                manual_cost_per_invoice, auto_cost_per_invoice)
+               VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
                ON CONFLICT (id) DO UPDATE SET
-                   auto_approve_ceiling  = EXCLUDED.auto_approve_ceiling,
-                   default_tolerance_pct = EXCLUDED.default_tolerance_pct,
-                   confidence_threshold  = EXCLUDED.confidence_threshold,
-                   min_confidence        = EXCLUDED.min_confidence,
-                   policy_version        = EXCLUDED.policy_version,
-                   severity_overrides    = EXCLUDED.severity_overrides""",
+                   auto_approve_ceiling    = EXCLUDED.auto_approve_ceiling,
+                   default_tolerance_pct   = EXCLUDED.default_tolerance_pct,
+                   confidence_threshold    = EXCLUDED.confidence_threshold,
+                   min_confidence          = EXCLUDED.min_confidence,
+                   policy_version          = EXCLUDED.policy_version,
+                   severity_overrides      = EXCLUDED.severity_overrides,
+                   manual_cost_per_invoice = EXCLUDED.manual_cost_per_invoice,
+                   auto_cost_per_invoice   = EXCLUDED.auto_cost_per_invoice""",
             POLICY,
         )
         cur.connection.commit()

@@ -190,3 +190,67 @@ def test_invalid_action_422(client, reset_db):
     r = client.post(f"/review/{run_id}/action",
                     headers=_hdr("manager", MGR), json={"action": "frobnicate"})
     assert r.status_code == 422
+
+
+# --------------------------------------------------------------------------- #
+# Review detail + file (powers the three flag-type views; either role may open
+# any queue item — the queue is global).
+# --------------------------------------------------------------------------- #
+
+@requires_db
+def test_review_detail_returns_context(client, reset_db):
+    run_id = _make_flagged_run()
+    r = client.get(f"/review/{run_id}", headers=_hdr("clerk", CLERK))
+    assert r.status_code == 200
+    d = r.json()
+    assert d["verdict"] == "FLAG"
+    assert d["review_payload"]["queue"] == "over_authority"
+    assert d["invoice_total"] == 566400.0
+    assert d["auto_approve_ceiling_applied"] == 200000.0
+    assert any(dr["signal"] == "over_authority" for dr in d["drivers"])
+
+
+@requires_db
+def test_review_detail_404_for_unknown(client, reset_db):
+    r = client.get("/review/00000000-0000-0000-0000-000000000099", headers=_hdr("manager", MGR))
+    assert r.status_code == 404
+
+
+@requires_db
+def test_review_detail_includes_line_side_by_side(client, reset_db):
+    """A line-variance FLAG surfaces the per-line invoice-vs-PO comparison."""
+    from app.validate.validator import validate
+    extr = {
+        "invoice_number": "LINEVAR-1",
+        "vendor_name": "Dell Technologies India Pvt Ltd",
+        "po_reference": "PO-5001", "total": 566400,
+        "line_items": [
+            {"description": "Latitude 5440 Laptop", "quantity": 6, "unit_price": 80000, "is_bundle": False},
+            {"description": 'UltraSharp 24" Monitor', "quantity": 5, "unit_price": 24000, "is_bundle": False},
+        ],
+        "tax": {"treatment": "separated", "rate_pct": 18},
+        "extraction_confidence": {"overall": 0.95},
+    }
+    run_id = recorder.start_run(invoice_number="LINEVAR-1", vendor_name="Dell",
+                                actor_user_id=CLERK, actor_role="clerk")
+    report = validate(extr, run_id=run_id)
+    verdict = engine.decide(report, extr, Policy(auto_approve_ceiling=750000,
+                            min_confidence=0.75, policy_version="t", severity_overrides={}))
+    assert verdict["verdict"] == "FLAG"
+    commit.commit_decision(verdict, report.get("matched_po"), 566400, run_id)
+
+    d = client.get(f"/review/{run_id}", headers=_hdr("manager", MGR)).json()
+    assert d["review_payload"]["queue"] == "line_variance"
+    assert isinstance(d["line_reconciliation"], list) and d["line_reconciliation"]
+    assert d["checks"] is not None
+
+
+@requires_db
+def test_review_file_404_then_streams(client, reset_db):
+    run_id = _make_flagged_run()
+    assert client.get(f"/review/{run_id}/file", headers=_hdr("clerk", CLERK)).status_code == 404
+    recorder.store_invoice_file(run_id, b"%PDF-1.4 scan", filename="x.pdf")
+    r = client.get(f"/review/{run_id}/file", headers=_hdr("manager", MGR))
+    assert r.status_code == 200
+    assert r.headers["content-type"] == "application/pdf"
+    assert r.content == b"%PDF-1.4 scan"
