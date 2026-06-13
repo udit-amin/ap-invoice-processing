@@ -40,8 +40,20 @@ app/
     models.py             Raw-SQL user-row helpers
     seed.py               Idempotent seed of the four demo users
   pipeline/
-    orchestrator.py       ingest → extract → match → validate → decide
-    router.py             POST /extract, POST /process (clerk-only)
+    orchestrator.py       ingest → extract → match → validate → decide (stamps actor)
+    router.py             POST /extract, POST /invoices/process (clerk-only)
+  invoices/
+    router.py             GET /invoices/runs, GET /invoices/runs/{run_id}
+    models.py             Tenant-scoped run list/detail (clerk = own, manager = all)
+  review/
+    router.py             GET /review/queue, POST /review/{run_id}/action
+    service.py            Effectful approve (PO draw-down) / reject / escalate
+  dashboard/
+    router.py             GET /dashboard/summary, /trends (manager-only)
+    models.py             Verdict-mix + daily-trend aggregates
+  policy/
+    router.py             GET /policy, PUT /policy (manager-only)
+    service.py            Validate + version-bump + audit policy edits
   audit/
     router.py             GET /audit/{invoice_number} (manager-only)
   db/
@@ -65,24 +77,31 @@ app/
     reason.py             Deterministic reason + review-payload assembly
     commit.py             Race-safe PO balance update + verdict persistence
   governance/
-    recorder.py           Append-only audit trail (runs, events, reports, verdicts)
+    recorder.py           Append-only audit trail (runs, events, reports) + actor identity
   generate/
     invoice_generator.py     v0 synthetic PDFs (extraction tests)
     invoice_generator_v1.py  v1 synthetic PDFs (validation tests)
 validate_all.py           CLI harness — runs all 11 invoices, prints the matrix + verdicts
 docker-compose.yml        Local Postgres
 .env.example              Documented environment variables
+CHANGELOG.md              Version history (v1 → v3.2)
+CLAUDE.md                 Repo guide + invariants for contributors / AI agents
 docs/
+  API.md                  Detailed per-endpoint usage reference (curl + shapes)
   MANUAL_TESTING.md       Step-by-step manual test guide
   QUERYING_THE_DB.md      How to inspect the database
 tests/
   conftest.py             Shared fixtures (auth headers)
   test_extraction.py      Extraction schema + behaviour (live, needs API key)
   test_validation.py      Pure validation logic (no infra)
-  test_governance.py      Postgres + governance integration (skip-if-down)
+  test_governance.py      Postgres + governance + actor trail (skip-if-down)
   test_decision.py        Decision engine — pure matrix + DB commit (skip-if-down)
   test_auth.py            JWT issue/verify + login/me (login skips if DB down)
   test_permissions.py     Route role-guard matrix (no infra)
+  test_invoices.py        Run list/detail scoping (skip-if-down)
+  test_review.py          Review queue + effectful approve/reject/escalate (skip-if-down)
+  test_dashboard.py       Dashboard aggregates + clerk 403 (skip-if-down)
+  test_policy.py          Live policy edit flips next verdict (skip-if-down)
 ```
 
 ## Setup
@@ -136,43 +155,62 @@ uvicorn app.main:app --reload
 | `GET  /auth/me` | Current user (UI session bootstrap) | any |
 | `GET  /health` | Liveness + whether the API key is set | public |
 | `POST /extract` | PDF → structured extraction JSON only | clerk |
-| `POST /process` | PDF → full pipeline: extraction + validation + **verdict** | clerk |
-| `GET  /audit/{invoice_number}` | Governance trail + latest verdict | manager |
+| `POST /invoices/process` | PDF → full pipeline: extraction + validation + **verdict** | clerk |
+| `GET  /invoices/runs` | List processed runs (clerk → own, manager → all; `?verdict=`) | clerk · manager |
+| `GET  /invoices/runs/{run_id}` | One run's detail (run + verdict + events) | clerk · manager |
+| `GET  /review/queue` | Flagged runs awaiting a human decision | clerk · manager |
+| `POST /review/{run_id}/action` | `approve` (draws PO down) / `reject` / `escalate` | clerk · manager |
+| `GET  /dashboard/summary` | Verdict mix, review backlog, totals | manager |
+| `GET  /dashboard/trends` | Per-day verdict counts (`?days=`) | manager |
+| `GET  /policy` | Current governance policy | manager |
+| `PUT  /policy` | Edit ceiling / confidence / severity map (audited) | manager |
+| `GET  /audit/{invoice_number}` | Governance trail + latest verdict (incl. actor) | manager |
+
+> See **[docs/API.md](docs/API.md)** for the full per-endpoint reference —
+> request/response shapes, status codes, and a runnable `curl` for each.
 
 ### Authentication & roles
 
-Two roles: **clerk** (uploads/processes invoices) and **manager** (reviews,
-reads the audit trail). Protected routes require an `Authorization: Bearer
-<token>` header; a clerk hitting a manager route (or vice-versa) gets **403**, a
-missing/invalid token gets **401**. Four demo users are seeded — clerks
-`priya@acmecorp.com` / `rahul@acmecorp.com` (`demo-clerk-1` / `-2`), managers
-`anjali@acmecorp.com` / `vikram@acmecorp.com` (`demo-mgr-1` / `-2`).
+Two roles: **clerk** (uploads/processes invoices, reviews) and **manager**
+(reviews, dashboard, policy, audit). Protected routes require an `Authorization:
+Bearer <token>` header; a clerk hitting a manager route (or vice-versa) gets
+**403**, a missing/invalid token gets **401**. Four demo users are seeded —
+clerks `priya@acmecorp.com` / `rahul@acmecorp.com` (`demo-clerk-1` / `-2`),
+managers `anjali@acmecorp.com` / `vikram@acmecorp.com` (`demo-mgr-1` / `-2`).
 
 ```bash
-# 1) log in as a clerk → grab the token
+# 1) clerk logs in and processes an invoice → run is stamped with the clerk
 TOKEN=$(curl -s -X POST http://localhost:8000/auth/login \
   -H 'Content-Type: application/json' \
   -d '{"email":"priya@acmecorp.com","password":"demo-clerk-1"}' \
   | python3 -c "import sys,json;print(json.load(sys.stdin)['access_token'])")
 
-# 2) clerk processes an invoice
-curl -s -X POST http://localhost:8000/process \
+RUN=$(curl -s -X POST http://localhost:8000/invoices/process \
   -H "Authorization: Bearer $TOKEN" \
-  -F "file=@data/inputs/edge_4_dell_line_mismatch.pdf" | python3 -m json.tool
+  -F "file=@data/inputs/edge_2_techgear_bundled.pdf" \
+  | python3 -c "import sys,json;d=json.load(sys.stdin);print(d['run_id'])")
 
-# 3) manager reads the audit trail (clerk token here would 403)
+# 2) manager reviews the flagged run and approves it (draws the PO down)
 MGR=$(curl -s -X POST http://localhost:8000/auth/login \
   -H 'Content-Type: application/json' \
   -d '{"email":"anjali@acmecorp.com","password":"demo-mgr-1"}' \
   | python3 -c "import sys,json;print(json.load(sys.stdin)['access_token'])")
-curl -s http://localhost:8000/audit/DEL%2F2026%2F0419 \
-  -H "Authorization: Bearer $MGR" | python3 -m json.tool
+
+curl -s http://localhost:8000/review/queue -H "Authorization: Bearer $MGR" | python3 -m json.tool
+curl -s -X POST "http://localhost:8000/review/$RUN/action" \
+  -H "Authorization: Bearer $MGR" -H 'Content-Type: application/json' \
+  -d '{"action":"approve","note":"confirmed bundle pricing"}' | python3 -m json.tool
+
+# 3) manager dashboard + audit trail (the trail now shows who did what)
+curl -s http://localhost:8000/dashboard/summary -H "Authorization: Bearer $MGR" | python3 -m json.tool
 ```
 
-`/process` returns `{run_id, extraction, validation, decision}`. Every run is
-recorded to the append-only governance trail in Postgres (`pipeline_runs`,
-`governance_events`, `validation_reports`, `verdicts`). Audit writes are
-best-effort — a logging failure never breaks the response.
+`/invoices/process` returns `{run_id, extraction, validation, decision}`. Every
+run and review action is recorded to the append-only governance trail in Postgres
+(`pipeline_runs`, `governance_events`, `validation_reports`, `verdicts`,
+`review_actions`), each stamped with the acting user (`actor_user_id`,
+`actor_role`, `action_type`). Audit writes are best-effort — a logging failure
+never breaks the response.
 
 ## The validation checks
 
@@ -365,13 +403,16 @@ pytest tests/test_validation.py -v   # pure validation logic, no infra
 pytest tests/test_permissions.py -v  # route role-guard matrix, no infra
 pytest tests/test_auth.py -v         # JWT (pure) + login/me (skips if DB down)
 pytest tests/test_decision.py -v     # decision matrix (pure) + commit (skips if DB down)
-pytest tests/test_governance.py -v   # Postgres integration (skips if DB down)
+pytest tests/test_review.py -v       # review queue + effectful actions (skips if DB down)
+pytest tests/test_policy.py -v       # live policy edit flips verdict (skips if DB down)
+pytest tests/test_governance.py -v   # Postgres + actor trail (skips if DB down)
 pytest tests/test_extraction.py -v   # extraction (live-model tests skip w/o key)
 ```
 
 `test_validation.py`, `test_permissions.py`, and the pure halves of
 `test_decision.py` / `test_auth.py` always run (in-memory data + synthetic
-tokens). The DB-backed tests skip cleanly when Postgres is unreachable.
+tokens). The DB-backed tests (`test_invoices`, `test_review`, `test_dashboard`,
+`test_policy`, `test_governance`) skip cleanly when Postgres is unreachable.
 Live-model extraction tests skip when `ANTHROPIC_API_KEY` is unset.
 
 ## Stack

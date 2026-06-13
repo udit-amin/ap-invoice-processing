@@ -36,17 +36,24 @@ a table), `\x` (toggle expanded row output — useful for JSONB), `\q` (quit).
 | `pipeline_runs` | One row per end-to-end execution (`run_id` UUID) |
 | `invoices` | Dedup ledger — `UNIQUE(invoice_number, vendor_name)` |
 | `validation_reports` | Full evidence report per run, as JSONB |
-| `governance_events` | Append-only audit trail: one+ row per stage |
+| `governance_events` | Append-only audit trail: one+ row per stage, with actor |
 | `verdicts` | The decision per run: verdict, reason, drivers, `po_balance_after` |
+| `review_actions` | Human review decisions (approve/reject/escalate) on flagged runs |
 | `users` | Login accounts — email, role (`clerk`/`manager`), bcrypt hash |
 
 `vendors` / `purchase_orders` / `po_line_items` / `policy_config` are seeded
 reference data. `users` is seeded with the four demo accounts. The rest are
 written at runtime by the pipeline.
 
-`pipeline_runs`, `validation_reports`, `governance_events`, `verdicts`, and
-`policy_config` also carry a `tenant_id` column (a fixed UUID for now — see
-`app/config.py:TENANT_ID`); every row currently shares the same tenant.
+`pipeline_runs`, `validation_reports`, `governance_events`, `verdicts`,
+`review_actions`, and `policy_config` carry a `tenant_id` column (a fixed UUID for
+now — see `app/config.py:TENANT_ID`); every row currently shares the same tenant.
+
+**Actor identity (PR2):** `governance_events` has `actor_user_id`, `actor_role`,
+and `action_type` (`pipeline_run | review_approve | review_reject |
+review_escalate | policy_change`); `pipeline_runs` records its creator in
+`actor_user_id` / `actor_role`. `verdicts` also stores `invoice_total` and
+`matched_po_id` so a review-approve can draw the PO down.
 
 ---
 
@@ -232,6 +239,40 @@ The verdict and its PO balance decrement are written in one transaction, so a
 
 ---
 
+## Review actions + actor trail (PR2)
+
+```sql
+-- Human review decisions, newest first (who approved/rejected/escalated what)
+SELECT ra.created_at, ra.action, ra.actor_role, ra.po_balance_after,
+       ra.invoice_number, u.name AS actor
+FROM review_actions ra
+LEFT JOIN users u ON u.user_id = ra.actor_user_id
+ORDER BY ra.created_at DESC;
+
+-- The flagged runs still awaiting a terminal decision (the review queue)
+SELECT v.invoice_number, v.reason
+FROM verdicts v
+WHERE v.requires_human_review = TRUE
+  AND NOT EXISTS (
+      SELECT 1 FROM review_actions ra
+      WHERE ra.run_id = v.run_id AND ra.action IN ('approve', 'reject'));
+
+-- Who did what, across the trail (action_type classifies each event)
+SELECT created_at, stage, status, action_type, actor, actor_role
+FROM governance_events
+WHERE actor_user_id IS NOT NULL
+ORDER BY created_at DESC
+LIMIT 20;
+
+-- Policy changes (run_id is NULL; detail holds the before/after)
+SELECT created_at, actor, actor_role, detail
+FROM governance_events
+WHERE action_type = 'policy_change'
+ORDER BY created_at DESC;
+```
+
+---
+
 ## Users
 
 ```sql
@@ -250,15 +291,15 @@ runs. (Reseed afterwards if you want APPROVE-decremented PO balances restored:
 `python -m app.db.seed`.)
 
 ```sql
-TRUNCATE governance_events, validation_reports, verdicts, invoices, pipeline_runs
-  RESTART IDENTITY CASCADE;
+TRUNCATE review_actions, governance_events, validation_reports, verdicts,
+         invoices, pipeline_runs RESTART IDENTITY CASCADE;
 ```
 
 Or from the shell:
 
 ```bash
 docker exec ap_invoices_db psql -U ap -d ap_invoices \
-  -c "TRUNCATE governance_events, validation_reports, verdicts, invoices, pipeline_runs RESTART IDENTITY CASCADE;"
+  -c "TRUNCATE review_actions, governance_events, validation_reports, verdicts, invoices, pipeline_runs RESTART IDENTITY CASCADE;"
 ```
 
 To reset *everything* including reference data, recreate the container and
