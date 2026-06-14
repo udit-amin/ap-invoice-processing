@@ -16,6 +16,7 @@ _PHRASE = {
     "duplicate":           "this invoice has already been processed",
     "total_tolerance":     "the invoice total is outside PO tolerance",
     "line_reconciliation": "line items do not reconcile with the PO",
+    "tax_present":         "the invoice does not include tax",
     "low_confidence":      "extraction confidence is below the auto-approve minimum",
     "incomplete":          "required fields are missing",
     "over_authority":      "the amount exceeds the auto-approve ceiling",
@@ -24,13 +25,14 @@ _PHRASE = {
 # Priority for choosing the dominant FLAG driver (most specific first).
 _FLAG_PRIORITY = [
     "line_reconciliation", "total_tolerance", "over_authority",
-    "low_confidence", "incomplete",
+    "tax_present", "low_confidence", "incomplete",
 ]
 
 _QUEUE = {
     "line_reconciliation": "line_variance",
     "total_tolerance":     "tolerance",
     "over_authority":      "over_authority",
+    "tax_present":         "missing_tax",
     "low_confidence":      "low_confidence",
     "incomplete":          "incomplete",
 }
@@ -39,6 +41,7 @@ _WHAT_TO_CHECK = {
     "line_variance":  "Confirm the billed quantities and unit prices against the PO before payment.",
     "tolerance":      "Confirm the overage against the PO is legitimate before payment.",
     "over_authority": "Amount exceeds auto-approve authority; route to an approver with sufficient limit.",
+    "missing_tax":    "The invoice shows no tax/GST — confirm the supply is genuinely tax-exempt, or request a corrected invoice with tax.",
     "low_confidence": "Extraction was uncertain; verify the key fields against the source PDF.",
     "incomplete":     "Required fields are missing; complete them before the invoice can be auto-processed.",
 }

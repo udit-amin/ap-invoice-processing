@@ -8,18 +8,18 @@ deployment + ops live in `docs/ARCHITECTURE.md` / `docs/OPERATIONS.md`.
 ## What this is
 
 An auditable accounts-payable pipeline: invoice PDF in → structured extraction →
-6-check validation evidence → an `APPROVE | FLAG | REJECT` verdict, with an
+7-check validation evidence → an `APPROVE | FLAG | REJECT` verdict, with an
 append-only governance trail and role-based API on top.
 
 ## Architecture (the stage boundary matters)
 
 ```
 PDF ─ingest→ extract ─→ match ─→ validate ─→ decide ─→ verdict (+ governance trail)
-            (Claude)   (PO+vendor) (6 checks) (policy)
+            (Claude)   (PO+vendor) (7 checks) (policy)
 ```
 
 - `app/extract/` — PDF → JSON (Claude; text vs vision path auto-detected).
-- `app/validate/` — `matcher.py` (fuzzy PO/vendor), `checks.py` (the 6 checks),
+- `app/validate/` — `matcher.py` (fuzzy PO/vendor), `checks.py` (the 7 checks),
   `validator.py` → an **evidence report, never a verdict**.
 - `app/decide/` — `policy.py` (loads `policy_config` + severity map),
   `engine.py` (**pure** resolver: evidence + confidence + policy → verdict),

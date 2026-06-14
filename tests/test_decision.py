@@ -82,6 +82,22 @@ def test_over_ceiling_flags():
     assert d["review_payload"]["queue"] == "over_authority"
 
 
+def test_missing_tax_flags():
+    # All standard checks pass; only tax_present fails → FLAG, queued as missing_tax.
+    checks = _PASS6 + [_chk("tax_present", "fail", "Invoice shows no tax")]
+    d = engine.decide(_report(checks), _extr(), POLICY)
+    assert d["verdict"] == FLAG
+    assert d["review_payload"]["queue"] == "missing_tax"
+
+
+def test_tax_present_pass_or_skip_does_not_escalate():
+    # pass = tax shown; skip = treatment unknown (the answer-key/dry-run shape).
+    # Neither escalates, so the verdict matrix is unaffected when tax isn't modelled.
+    for status in ("pass", "skip"):
+        checks = _PASS6 + [_chk("tax_present", status)]
+        assert engine.decide(_report(checks), _extr(), POLICY)["verdict"] == APPROVE
+
+
 def test_po_not_found_plus_vendor_rejects():
     d = engine.decide(
         _with({"po_lookup": ("fail", "PO-9999 not found"),

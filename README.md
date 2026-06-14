@@ -12,7 +12,7 @@ The pipeline has four stages:
 
 ```
             ┌─ extract ─┐  ┌─ match ─┐  ┌─ validate ─┐  ┌─ decide ──┐
- PDF ─ingest┤ Claude →  │→ │ PO +    │→ │ 6 checks → │→ │ policy →   │→ verdict
+ PDF ─ingest┤ Claude →  │→ │ PO +    │→ │ 7 checks → │→ │ policy →   │→ verdict
             │ JSON      │  │ vendor  │  │ evidence   │  │ APPROVE/   │  + reason
             └───────────┘  └─────────┘  │(no verdict)│  │ FLAG/REJECT│
                                         └────────────┘  └───────────┘
@@ -69,7 +69,7 @@ app/
   validate/
     loader.py             Load POs + vendors from Postgres
     matcher.py            Fuzzy vendor / line-item matching (rapidfuzz)
-    checks.py             The six validation checks
+    checks.py             The seven validation checks
     validator.py          Runs checks → evidence report (no verdict)
   decide/
     policy.py             Load policy_config + data-driven severity map
@@ -283,37 +283,34 @@ Manager · Bedrock/Anthropic · CloudWatch) and how to operate it, see
 
 ### Live deployment (Render)
 
-The whole stack deploys from one repo via a [`render.yaml`](render.yaml)
-Blueprint: a managed Postgres plus two web services built from a single
-[`Dockerfile`](Dockerfile) — `ap-api` (`uvicorn app.main:app`) and `ap-ui`
-(`streamlit run ui/app.py`). The browser only talks to the Streamlit URL; the UI
-calls the API server-side, so there's **no CORS** to configure. The API
+One [`render.yaml`](render.yaml) Blueprint provisions **two environments** from a
+single [`Dockerfile`](Dockerfile) — staging (`ap-api-staging` + `ap-ui-staging`,
+branch `staging`) and production (`ap-api-prod` + `ap-ui-prod`, branch
+`production`), each with its own Postgres. The browser only talks to the Streamlit
+URL; the UI calls the API server-side, so there's **no CORS** to configure. The API
 self-applies the schema and seeds reference data + demo users on first boot.
 
 ```text
-browser → ap-ui (Streamlit, public) → ap-api (FastAPI) → ap-invoices-db (Postgres)
+browser → ap-ui-<env> (Streamlit, public) → ap-api-<env> (FastAPI) → ap-invoices-db-<env>
 ```
 
-1. Render → **New → Blueprint** → pick this repo (creates the DB + both services).
-2. Set `ANTHROPIC_API_KEY` on `ap-api` (secret); after the first deploy, set
-   `ap-ui`'s `API_BASE_URL` to `ap-api`'s URL (e.g. `https://ap-api.onrender.com`).
-3. Seed demo history so the dashboard isn't empty. Free-tier services have no
-   Shell, so run it from your laptop against the database's **External URL**
-   (Render → `ap-invoices-db` → Connect):
-   `DATABASE_URL='<external-url>?sslmode=require' .venv/bin/python scripts/seed_demo_history.py`
-   (no key needed). Then open the `ap-ui` URL and log in.
+Each service is `autoDeploy: false`; deploys are driven by the **CI-gated** GitHub
+deploy hooks (a merge into `staging`/`production` runs CI, then deploys that env).
+**Full step-by-step setup — apply the Blueprint, env vars, hooks, secrets — is in
+[docs/DEPLOYMENT.md](docs/DEPLOYMENT.md).**
 
-**The grader opens the `ap-ui` URL.** Logins: `priya@zamp.ai` / `demo-clerk-1`
+**The grader opens the `ap-ui-prod` URL.** Logins: `priya@zamp.ai` / `demo-clerk-1`
 (clerk), `anjali@zamp.ai` / `demo-mgr-1` (manager). The 5-minute video script and
 the live runbook (warm the URL, reset state, which PDFs to upload) are in
 **[docs/DEMO.md](docs/DEMO.md)**.
 
 ### CI/CD (GitHub Actions)
 
-A `feature → main → staging → production` gitflow with test-gated deploys:
+A `feature → develop → staging → production` gitflow with test-gated deploys
+(`develop` is the repo's default/integration branch):
 
 - **CI** ([`.github/workflows/ci.yml`](.github/workflows/ci.yml)) runs on every PR
-  and push to `main` — a Postgres service, the full `pytest` suite, the
+  and push to `develop` — a Postgres service, the full `pytest` suite, the
   `validate_all --dry-run` verdict-matrix smoke, and a Docker build of the deploy image.
 - **CD** ([`.github/workflows/deploy.yml`](.github/workflows/deploy.yml)) runs on a
   merge into `staging` or `production`: it re-runs CI and, only if green, POSTs the
@@ -324,7 +321,7 @@ Setup (secrets, Render environments, branch protection) is in
 
 ## The validation checks
 
-The validator runs six checks; each returns `pass | fail | skip` with a
+The validator runs seven checks; each returns `pass | fail | skip` with a
 human-readable reason. `skip` is a first-class outcome (the check could not run
 meaningfully by design) — it is never collapsed into pass or fail.
 
@@ -335,7 +332,13 @@ meaningfully by design) — it is never collapsed into pass or fail.
 | `po_status` | Is the matched PO `open`? |
 | `total_tolerance` | Is the invoice total within the PO's own `tolerance_pct`? |
 | `line_reconciliation` | Do line qty/price reconcile? (bundled / embedded-tax fallbacks) |
+| `tax_present` | Does the invoice declare tax (separated or embedded)? `none` → FLAG; unknown → skip |
 | `duplicate` | First time we've seen this invoice? (race-proof via a DB unique constraint) |
+
+`tax_present` is a **pure presence check** on the extractor's tax classification —
+it does no amount math and never touches the PO, so it can't conflict with
+`total_tolerance` / `line_reconciliation` (which already handle the tax-inclusive
+total vs ex-tax line prices).
 
 `line_reconciliation` classifies each line as `exact_match` / `price_variance` /
 `qty_variance` / `qty_and_price_variance` / `unmatched_invoice_line` /

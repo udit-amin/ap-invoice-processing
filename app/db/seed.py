@@ -79,6 +79,13 @@ PURCHASE_ORDERS = [
         ("Social media campaign (Q2)", 1, 200000),
         ("Creative design retainer", 1, 100000),
      ]),
+    # PO-5011 — amounts stored EX-TAX (no markup) so a no-tax invoice matches it
+    # exactly on total + lines, isolating the tax_present check (the only flag).
+    # Reserved for the missing-tax demo, like the PO-5002/5003 edge-case slots.
+    ("PO-5011", "V-003", "FastFreight Logistics",
+     "Reserved — tax-presence demo (zero-rated freight)", 200000, 200000, "open", 5, [
+        ("Inter-state freight (zero-rated)", 1, 200000),
+     ]),
 ]
 
 # (id, auto_approve_ceiling, default_tolerance_pct, confidence_threshold,
