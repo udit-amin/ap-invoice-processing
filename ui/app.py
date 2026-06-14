@@ -12,7 +12,7 @@ import streamlit as st
 
 import api_client
 import session
-from views import batch_ingest, dashboard, policy, review_queue, run_view
+from views import batch_ingest, dashboard, decisions, policy, review_queue, run_view
 
 st.set_page_config(page_title="AP Invoice Processing", page_icon="🧾", layout="wide")
 
@@ -35,8 +35,8 @@ def _login() -> None:
 
     with st.expander("Demo users"):
         st.markdown(
-            "- **Priya / Rahul** — clerk · `priya@acmecorp.com` / `rahul@acmecorp.com` · `demo-clerk-1` / `demo-clerk-2`\n"
-            "- **Anjali / Vikram** — manager · `anjali@acmecorp.com` / `vikram@acmecorp.com` · `demo-mgr-1` / `demo-mgr-2`"
+            "- **Priya / Rahul** — clerk · `priya@zamp.ai` / `rahul@zamp.ai` · `demo-clerk-1` / `demo-clerk-2`\n"
+            "- **Anjali / Vikram** — manager · `anjali@zamp.ai` / `vikram@zamp.ai` · `demo-mgr-1` / `demo-mgr-2`"
         )
 
 
@@ -59,10 +59,12 @@ _PAGES = {
     "clerk": lambda: [
         st.Page(run_view.render, title="Run view", icon="📤", url_path="run", default=True),
         st.Page(batch_ingest.render, title="Batch ingest", icon="📥", url_path="batch"),
+        st.Page(decisions.render, title="Processed", icon="🗂️", url_path="processed"),
         st.Page(review_queue.render, title="Review queue", icon="📋", url_path="review"),
     ],
     "manager": lambda: [
         st.Page(review_queue.render, title="Review queue", icon="📋", url_path="review", default=True),
+        st.Page(decisions.render, title="Processed", icon="🗂️", url_path="processed"),
         st.Page(dashboard.render, title="Dashboard", icon="📊", url_path="dashboard"),
         st.Page(policy.render, title="Policy", icon="⚙️", url_path="policy"),
     ],

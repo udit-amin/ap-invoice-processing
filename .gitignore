@@ -18,5 +18,9 @@ venv/
 # Generated data (PDFs are regenerated from app/generate/)
 data/inputs/*.pdf
 
+# Ingest worker landing/archive (runtime PDFs; landing dir kept via .gitkeep)
+data/landing/*.pdf
+data/archive/
+
 # Stray SQLite artifacts — the pipeline uses Postgres; *.db should never be committed
 *.db

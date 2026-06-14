@@ -25,16 +25,16 @@ Two roles: **clerk** (process invoices, review) and **manager** (review,
 dashboard, policy, audit). Tokens are HS256 JWTs, 1-hour expiry by default
 (`JWT_EXPIRE_SECONDS`).
 
-**Demo users** (seeded): clerks `priya@acmecorp.com` / `rahul@acmecorp.com`
-(`demo-clerk-1` / `demo-clerk-2`); managers `anjali@acmecorp.com` /
-`vikram@acmecorp.com` (`demo-mgr-1` / `demo-mgr-2`).
+**Demo users** (seeded): clerks `priya@zamp.ai` / `rahul@zamp.ai`
+(`demo-clerk-1` / `demo-clerk-2`); managers `anjali@zamp.ai` /
+`vikram@zamp.ai` (`demo-mgr-1` / `demo-mgr-2`).
 
 ### `POST /auth/login` · public
 
 Request (JSON):
 
 ```json
-{ "email": "priya@acmecorp.com", "password": "demo-clerk-1" }
+{ "email": "priya@zamp.ai", "password": "demo-clerk-1" }
 ```
 
 Response `200`:
@@ -53,7 +53,7 @@ Response `200`:
 ```bash
 curl -s -X POST http://localhost:8000/auth/login \
   -H 'Content-Type: application/json' \
-  -d '{"email":"priya@acmecorp.com","password":"demo-clerk-1"}'
+  -d '{"email":"priya@zamp.ai","password":"demo-clerk-1"}'
 ```
 
 A handy shell helper used throughout this doc:
@@ -64,8 +64,8 @@ login() { curl -s -X POST http://localhost:8000/auth/login \
   -d "{\"email\":\"$1\",\"password\":\"$2\"}" \
   | python3 -c "import sys,json;print(json.load(sys.stdin)['access_token'])"; }
 
-CLERK=$(login priya@acmecorp.com demo-clerk-1)
-MGR=$(login anjali@acmecorp.com demo-mgr-1)
+CLERK=$(login priya@zamp.ai demo-clerk-1)
+MGR=$(login anjali@zamp.ai demo-mgr-1)
 ```
 
 ### `GET /auth/me` · any authenticated user

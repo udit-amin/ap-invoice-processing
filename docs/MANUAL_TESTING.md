@@ -148,7 +148,7 @@ python -m app.db.seed     # restore PO-5001 balance to 566400/open
 
 TOKEN=$(curl -s -X POST localhost:8000/auth/login \
   -H 'Content-Type: application/json' \
-  -d '{"email":"priya@acmecorp.com","password":"demo-clerk-1"}' \
+  -d '{"email":"priya@zamp.ai","password":"demo-clerk-1"}' \
   | python3 -c "import sys,json;print(json.load(sys.stdin)['access_token'])")
 
 curl -s -X POST localhost:8000/invoices/process -H "Authorization: Bearer $TOKEN" \
@@ -192,7 +192,7 @@ curl -s http://localhost:8000/health | python3 -m json.tool
 # Log in as a clerk → grab a bearer token
 TOKEN=$(curl -s -X POST http://localhost:8000/auth/login \
   -H 'Content-Type: application/json' \
-  -d '{"email":"priya@acmecorp.com","password":"demo-clerk-1"}' \
+  -d '{"email":"priya@zamp.ai","password":"demo-clerk-1"}' \
   | python3 -c "import sys,json;print(json.load(sys.stdin)['access_token'])")
 
 # Extract only (structured JSON; no validation)
@@ -206,7 +206,7 @@ curl -s -X POST http://localhost:8000/invoices/process -H "Authorization: Bearer
 # Audit trail requires a manager token (clerk token here → 403)
 MGR=$(curl -s -X POST http://localhost:8000/auth/login \
   -H 'Content-Type: application/json' \
-  -d '{"email":"anjali@acmecorp.com","password":"demo-mgr-1"}' \
+  -d '{"email":"anjali@zamp.ai","password":"demo-mgr-1"}' \
   | python3 -c "import sys,json;print(json.load(sys.stdin)['access_token'])")
 
 # Audit trail for an invoice (note: '/' is URL-encoded as %2F)
@@ -248,10 +248,10 @@ docker exec ap_invoices_db psql -U ap -d ap_invoices \
   -c "TRUNCATE review_actions, governance_events, validation_reports, verdicts, invoices, pipeline_runs RESTART IDENTITY CASCADE;"
 
 CLERK=$(curl -s -X POST localhost:8000/auth/login -H 'Content-Type: application/json' \
-  -d '{"email":"priya@acmecorp.com","password":"demo-clerk-1"}' \
+  -d '{"email":"priya@zamp.ai","password":"demo-clerk-1"}' \
   | python3 -c "import sys,json;print(json.load(sys.stdin)['access_token'])")
 MGR=$(curl -s -X POST localhost:8000/auth/login -H 'Content-Type: application/json' \
-  -d '{"email":"anjali@acmecorp.com","password":"demo-mgr-1"}' \
+  -d '{"email":"anjali@zamp.ai","password":"demo-mgr-1"}' \
   | python3 -c "import sys,json;print(json.load(sys.stdin)['access_token'])")
 ```
 

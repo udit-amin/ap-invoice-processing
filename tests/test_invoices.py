@@ -143,3 +143,15 @@ def test_runs_list_has_amount_and_confidence(client, reset_db):
     row = next(r for r in runs if r["invoice_number"] == "INV-A1")
     assert row["invoice_total"] == 566400.0       # from the verdict
     assert row["overall_conf"] == 0.95            # from the run
+
+
+@requires_db
+def test_runs_list_surfaces_manual_override(client, reset_db):
+    run_id = _make_run(CLERK_A, "INV-OV", _PASS)  # auto-APPROVE
+    # a human manually rejects it (override) via the review action endpoint
+    client.post(f"/review/{run_id}/action", headers=_hdr("manager", MGR),
+                json={"action": "reject", "note": "override"})
+    runs = client.get("/invoices/runs", headers=_hdr("manager", MGR)).json()["runs"]
+    row = next(r for r in runs if r["invoice_number"] == "INV-OV")
+    assert row["verdict"] == "APPROVE"     # the AI verdict is unchanged
+    assert row["last_action"] == "reject"  # the human override is surfaced

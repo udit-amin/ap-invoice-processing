@@ -78,6 +78,8 @@ app/
     commit.py             Race-safe PO balance update + verdict persistence
   governance/
     recorder.py           Append-only audit trail (runs, events, reports) + actor identity
+  ingest/
+    worker.py             Landing → process → archive (YYYYMMDD); simulates the AWS pickup worker
   generate/
     invoice_generator.py     v0 synthetic PDFs (extraction tests)
     invoice_generator_v1.py  v1 synthetic PDFs (validation tests)
@@ -85,7 +87,7 @@ ui/                       Streamlit front end (v4) — thin client over the API
   app.py                  Login gate + role-driven st.navigation + sidebar
   api_client.py           One fn per endpoint + bearer + human-label translation
   session.py              Token + current user in st.session_state
-  views/                  run_view, batch_ingest, review_queue, dashboard, policy (one render() each)
+  views/                  run_view, batch_ingest, decisions, review_queue, dashboard, policy (one render() each)
   components/             decision_card, stage_tracker, invoice_detail
 validate_all.py           CLI harness — runs all 11 invoices, prints the matrix + verdicts
 scripts/
@@ -96,6 +98,8 @@ CHANGELOG.md              Version history (v1 → v4)
 CLAUDE.md                 Repo guide + invariants for contributors / AI agents
 docs/
   API.md                  Detailed per-endpoint usage reference (curl + shapes)
+  ARCHITECTURE.md         AWS deployment architecture (topology, flows, trade-offs)
+  OPERATIONS.md           Deploy, configure, run the worker, monitor, runbooks
   MANUAL_TESTING.md       Step-by-step manual test guide
   QUERYING_THE_DB.md      How to inspect the database
 tests/
@@ -111,6 +115,7 @@ tests/
   test_dashboard.py       Dashboard aggregates + KPIs + clerk 403 (skip-if-down)
   test_pipeline_events.py /invoices/process events + file/extraction persistence (skip-if-down)
   test_ui_labels.py       UI translation layer (stage mapping + label maps; no infra)
+  test_ingest.py          Ingest worker date partitioning + landing→archive sweep (no infra)
   test_policy.py          Live policy edit flips next verdict (skip-if-down)
 ```
 
@@ -189,14 +194,14 @@ Two roles: **clerk** (uploads/processes invoices, reviews) and **manager**
 (reviews, dashboard, policy, audit). Protected routes require an `Authorization:
 Bearer <token>` header; a clerk hitting a manager route (or vice-versa) gets
 **403**, a missing/invalid token gets **401**. Four demo users are seeded —
-clerks `priya@acmecorp.com` / `rahul@acmecorp.com` (`demo-clerk-1` / `-2`),
-managers `anjali@acmecorp.com` / `vikram@acmecorp.com` (`demo-mgr-1` / `-2`).
+clerks `priya@zamp.ai` / `rahul@zamp.ai` (`demo-clerk-1` / `-2`),
+managers `anjali@zamp.ai` / `vikram@zamp.ai` (`demo-mgr-1` / `-2`).
 
 ```bash
 # 1) clerk logs in and processes an invoice → run is stamped with the clerk
 TOKEN=$(curl -s -X POST http://localhost:8000/auth/login \
   -H 'Content-Type: application/json' \
-  -d '{"email":"priya@acmecorp.com","password":"demo-clerk-1"}' \
+  -d '{"email":"priya@zamp.ai","password":"demo-clerk-1"}' \
   | python3 -c "import sys,json;print(json.load(sys.stdin)['access_token'])")
 
 RUN=$(curl -s -X POST http://localhost:8000/invoices/process \
@@ -207,7 +212,7 @@ RUN=$(curl -s -X POST http://localhost:8000/invoices/process \
 # 2) manager reviews the flagged run and approves it (draws the PO down)
 MGR=$(curl -s -X POST http://localhost:8000/auth/login \
   -H 'Content-Type: application/json' \
-  -d '{"email":"anjali@acmecorp.com","password":"demo-mgr-1"}' \
+  -d '{"email":"anjali@zamp.ai","password":"demo-mgr-1"}' \
   | python3 -c "import sys,json;print(json.load(sys.stdin)['access_token'])")
 
 curl -s http://localhost:8000/review/queue -H "Authorization: Bearer $MGR" | python3 -m json.tool
@@ -248,6 +253,7 @@ seeded user; the sidebar shows only the pages your role can use:
 | **Run view** | ✅ | — | Upload a PDF → the seven stages light up from the **real** governance events → decision card + "what the system saw" |
 | **Batch ingest** | ✅ | — | Process every PDF in a server-side folder through the pipeline → progress + a results table |
 | **Review queue** | ✅ | ✅ | Flagged items (oldest-first) with a distinct view per flag type: line-variance side-by-side, over-ceiling amount, low-confidence scan + flagged fields → approve / reject / escalate |
+| **Processed** | ✅ | ✅ | Every AI decision (clerk → own, manager → all) — monitor it or **manually reject (override)** |
 | **Dashboard** | — | ✅ | Five KPI cards (+ an honest quality-monitoring placeholder), flag/rejection breakdowns, a 30-day trend, and a filterable runs table with an audit drill-in |
 | **Policy** | — | ✅ | Edit the auto-approve ceiling / confidence gate live (a subsequent fresh run reflects it) |
 
@@ -256,6 +262,24 @@ pipeline itself runs in well under a second) — no timings or statuses are
 invented. Quality KPIs (false-approve / override) are shown as an honest
 "coming soon" placeholder rather than fabricated, since they need a downstream
 ground-truth signal.
+
+## Automated ingestion & deployment
+
+An ingestion worker simulates the AWS pickup flow — invoices land in one place,
+get processed, and are archived by date:
+
+```bash
+.venv/bin/python -m app.ingest.worker --seed
+# demo fixtures → data/landing/ → pipeline → data/archive/<YYYYMMDD>/
+```
+
+It sweeps a *landing* folder, runs each PDF through the **same** pipeline as the
+UI (stamped as the system actor), and moves it to a date-partitioned *archive*
+folder; a file that fails to process is left for retry. For how this maps to AWS
+(ALB · ECS Fargate · RDS · S3 landing/archive · scheduled worker · Secrets
+Manager · Bedrock/Anthropic · CloudWatch) and how to operate it, see
+**[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)** and
+**[docs/OPERATIONS.md](docs/OPERATIONS.md)**.
 
 ## The validation checks
 

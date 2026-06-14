@@ -39,9 +39,14 @@ def list_runs(
                        r.source_type, r.started_at, r.finished_at,
                        r.actor_user_id, r.actor_role,
                        v.verdict, v.requires_human_review, v.po_balance_after,
-                       v.invoice_total, r.overall_conf
+                       v.invoice_total, r.overall_conf, la.action
                 FROM pipeline_runs r
                 LEFT JOIN verdicts v ON v.run_id = r.run_id
+                LEFT JOIN LATERAL (
+                    SELECT action FROM review_actions ra
+                    WHERE ra.run_id = r.run_id AND ra.action IN ('approve', 'reject')
+                    ORDER BY ra.created_at DESC LIMIT 1
+                ) la ON TRUE
                 WHERE {' AND '.join(where)}
                 ORDER BY r.started_at DESC
                 LIMIT %s OFFSET %s""",
@@ -112,7 +117,7 @@ def get_run(run_id: str, *, role: str, actor_user_id: str | None) -> dict[str, A
 def _summary(row: tuple) -> dict[str, Any]:
     (run_id, inv, vendor, po, source, started, finished,
      actor_user_id, actor_role, verdict, needs_review, bal_after,
-     invoice_total, overall_conf) = row
+     invoice_total, overall_conf, last_action) = row
     return {
         "run_id": str(run_id),
         "invoice_number": inv,
@@ -121,6 +126,7 @@ def _summary(row: tuple) -> dict[str, Any]:
         "source_type": source,
         "verdict": verdict,
         "requires_human_review": needs_review,
+        "last_action": last_action,  # latest terminal human action (approve/reject), or None
         "invoice_total": float(invoice_total) if invoice_total is not None else None,
         "overall_conf": float(overall_conf) if overall_conf is not None else None,
         "po_balance_after": float(bal_after) if bal_after is not None else None,

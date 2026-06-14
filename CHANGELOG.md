@@ -5,6 +5,28 @@ All notable changes to this project are documented here. The format follows
 labelled milestones (`v1`, `v2`, `v3.x`) rather than on a fixed release cadence;
 each PR adds an entry.
 
+## [v4.1] — Folder ingestion, decision monitoring, AWS docs
+
+A demo-readiness round on top of v4.
+
+### Added
+- **Ingestion worker** (`app/ingest/worker.py`; `python -m app.ingest.worker`) —
+  sweeps a *landing* folder, runs each PDF through the same `process_invoice`
+  pipeline (stamped as the system actor), and moves it to an *archive* folder
+  partitioned by processing date (`YYYYMMDD`). Simulates the AWS S3 landing →
+  archive worker; a file that fails to process is left in landing for retry.
+  `--seed` copies the demo fixtures into landing.
+- **Processed view** (`ui/views/decisions.py`; clerk + manager) — monitor every
+  AI decision (clerk sees own, manager sees all) and **manually reject
+  (override)** one, recorded on the governance trail. `GET /invoices/runs` now
+  returns `last_action`, so a human override shows beside the AI verdict.
+- **AWS docs** — `docs/ARCHITECTURE.md` (pretend-AWS topology + flows + design
+  trade-offs) and `docs/OPERATIONS.md` (deploy, config, worker, monitoring,
+  runbooks, demo script).
+
+### Changed
+- Demo users rebranded from `@acmecorp.com` to **`@zamp.ai`**.
+
 ## [v4] — Streamlit UI + dashboard KPIs
 
 The operational surface: a thin Streamlit client over the v3 API (login, live run

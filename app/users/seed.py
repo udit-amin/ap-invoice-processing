@@ -13,10 +13,10 @@ from app.users import models
 
 # (name, email, role, password) — demo credentials (handover §2.2).
 DEMO_USERS = [
-    ("Priya Nair",   "priya@acmecorp.com",  "clerk",   "demo-clerk-1"),
-    ("Rahul Sharma", "rahul@acmecorp.com",  "clerk",   "demo-clerk-2"),
-    ("Anjali Mehta", "anjali@acmecorp.com", "manager", "demo-mgr-1"),
-    ("Vikram Iyer",  "vikram@acmecorp.com", "manager", "demo-mgr-2"),
+    ("Priya Nair",   "priya@zamp.ai",  "clerk",   "demo-clerk-1"),
+    ("Rahul Sharma", "rahul@zamp.ai",  "clerk",   "demo-clerk-2"),
+    ("Anjali Mehta", "anjali@zamp.ai", "manager", "demo-mgr-1"),
+    ("Vikram Iyer",  "vikram@zamp.ai", "manager", "demo-mgr-2"),
 ]
 
 
