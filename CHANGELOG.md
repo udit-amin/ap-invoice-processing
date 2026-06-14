@@ -5,6 +5,101 @@ All notable changes to this project are documented here. The format follows
 labelled milestones (`v1`, `v2`, `v3.x`) rather than on a fixed release cadence;
 each PR adds an entry.
 
+## [v4.2] — Live deployment (Render) + demo kit
+
+Makes the process *live and runnable* at a public URL and prepares the demo. No
+application code changes — the app already reads every knob from the environment
+and self-bootstraps; this round is deploy artifacts + demo tooling + docs.
+
+### Added
+- **One-image container** — a repo-root [`Dockerfile`](Dockerfile) (+ `.dockerignore`)
+  that runs both roles: the API (`uvicorn`, default CMD) and the UI (`streamlit`,
+  command overridden). Realises the "one image, multiple entrypoints" story.
+- **Render Blueprint** — [`render.yaml`](render.yaml): a managed Postgres plus two
+  web services (`ap-api`, `ap-ui`). UI → API is server-side, so there's no CORS;
+  the grader only needs the `ap-ui` URL. The API self-applies schema + seeds on boot.
+- **Live-demo invoice generator** — `scripts/make_live_demo_invoices.py` mints
+  fresh-numbered PDFs (Dell→APPROVE, Globex→REJECT, TechGear→FLAG) into
+  `data/demo_live/`, so the live happy-path upload is a clean APPROVE rather than a
+  duplicate. Verdicts verified end-to-end through the real pipeline.
+- **[docs/DEMO.md](docs/DEMO.md)** — the operational-flow one-pager, a timed 5-minute
+  video script (happy path + edge cases + manager + close), the edge-case table, and a
+  live runbook (warm the URL, reset state, which files to upload).
+
+### Changed
+- `README.md` (a "Live deployment (Render)" section) and `docs/OPERATIONS.md` §3 (the
+  concrete Render path beside the AWS outline) document the deploy.
+
+## [v4.1] — Folder ingestion, decision monitoring, AWS docs
+
+A demo-readiness round on top of v4.
+
+### Added
+- **Ingestion worker** (`app/ingest/worker.py`; `python -m app.ingest.worker`) —
+  sweeps a *landing* folder, runs each PDF through the same `process_invoice`
+  pipeline (stamped as the system actor), and moves it to an *archive* folder
+  partitioned by processing date (`YYYYMMDD`). Simulates the AWS S3 landing →
+  archive worker; a file that fails to process is left in landing for retry.
+  `--seed` copies the demo fixtures into landing.
+- **Processed view** (`ui/views/decisions.py`; clerk + manager) — monitor every
+  AI decision (clerk sees own, manager sees all) and **manually reject
+  (override)** one, recorded on the governance trail. `GET /invoices/runs` now
+  returns `last_action`, so a human override shows beside the AI verdict.
+- **AWS docs** — `docs/ARCHITECTURE.md` (pretend-AWS topology + flows + design
+  trade-offs) and `docs/OPERATIONS.md` (deploy, config, worker, monitoring,
+  runbooks, demo script).
+
+### Changed
+- Demo users rebranded from `@acmecorp.com` to **`@zamp.ai`**.
+- **Source-document preview now renders the native PDF** (`st.pdf` /
+  `streamlit-pdf`) for *every* invoice — selectable text for text invoices (e.g.
+  DEL/2026/0419), the page image for scans — in the run view, the review detail
+  (all flag types, not just low-confidence), and the Processed view. Supersedes
+  the rasterised-image preview for the UI; `requirements` gains `streamlit[pdf]`.
+
+## [v4] — Streamlit UI + dashboard KPIs
+
+The operational surface: a thin Streamlit client over the v3 API (login, live run
+view, review queue, manager dashboard, policy editor) plus the small backend
+additions it needs. No business logic in the UI — it calls endpoints and renders.
+
+### Added
+- **`ui/` Streamlit app** — login gate + role-driven `st.navigation` (clerks see
+  Run view + Batch ingest + Review queue; managers see Review queue + Dashboard +
+  Policy). One `api_client` wraps every endpoint and owns the human-label
+  translation layer; `session` keeps the token across reruns. The run view
+  replays the real governance events as a live stage tracker; **Batch ingest**
+  runs every PDF in a server-side folder through the pipeline (progress + results
+  table); the review queue renders a distinct view per flag type (line-variance
+  side-by-side, over-ceiling amount, low-confidence scan + flagged fields, the
+  scan rendered server-side to an image); the dashboard shows five KPI cards (+ an
+  honest quality placeholder), flag/rejection breakdowns, a trend chart, and a
+  runs table with an audit drill-in.
+- **`GET /dashboard/kpis`** (manager) — STP rate, avg cycle time, avg time-in-
+  queue, touchless savings, audit completeness, and flags/rejections-by-reason,
+  each with a prior-period delta, in one payload. Quality KPIs (false-approve /
+  override) are deliberately omitted, not faked; duplicate detection is a
+  *safeguard*, surfaced only in the rejections breakdown — not a savings KPI.
+- **`GET /review/{run_id}`**, **`/file`**, and **`/preview`** — full review
+  context (drivers, review payload, extraction, per-line side-by-side), the
+  stored original PDF, and a server-rendered PNG of a source page for an inline
+  preview. Either role (the queue is global).
+- `manual_cost_per_invoice` / `auto_cost_per_invoice` on `policy_config`
+  (₹900 / ₹170) for touchless savings; `pipeline_runs.extraction` JSONB + an
+  `invoice_files` (BYTEA) table persisting each upload, so the review UI can show
+  extracted fields and the source scan after the fact.
+- `scripts/seed_demo_history.py` — back-dated runs (with stored files/extraction)
+  so the dashboard isn't empty in a demo. New tests: `test_pipeline_events`,
+  `test_ui_labels`, plus KPI / review-detail / runs-amount coverage.
+
+### Changed
+- **`POST /invoices/process` now returns the `events` array** (the run's ordered
+  governance trail) so the UI replays the real stages in a single call.
+- **`GET /invoices/runs`** list items now include `invoice_total` and
+  `overall_conf` for the dashboard runs table.
+- The deterministic decision path is untouched — verdicts stay reproducible
+  (the 11-fixture matrix is still 6 APPROVE / 3 FLAG / 2 REJECT).
+
 ## [v3.2] — Endpoints + audit actor identity
 
 The working API surface a UI needs, and a trail that records *who did what*.

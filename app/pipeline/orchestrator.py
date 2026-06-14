@@ -10,6 +10,8 @@ passes None and everything is stamped as the system actor.
 """
 from __future__ import annotations
 
+from pathlib import Path
+
 from app.extract.extractor import extract
 from app.validate.validator import validate
 from app.governance import recorder
@@ -24,7 +26,7 @@ def process_invoice(
 ) -> dict:
     """Run a PDF through extraction and validation under one governance run.
 
-    Returns {run_id, extraction, validation, decision}. Never raises on
+    Returns {run_id, extraction, validation, decision, events}. Never raises on
     governance failures (those are best-effort); extraction/validation already
     return structured payloads rather than raising.
     """
@@ -32,6 +34,13 @@ def process_invoice(
     label = invoice_path_label or pdf_path
     run_id = recorder.start_run(invoice_path=label,
                                 actor_user_id=actor_user_id, actor_role=actor_role)
+    # Persist the original upload so the review UI can show the source PDF later.
+    # Best-effort: a read/storage failure must not break the run.
+    try:
+        _file_bytes = Path(pdf_path).read_bytes()
+    except OSError:
+        _file_bytes = None
+    recorder.store_invoice_file(run_id, _file_bytes, filename=label)
     recorder.log_event(run_id, recorder.INGEST, recorder.OK,
                        detail={"invoice_path": label}, actor=actor_label,
                        actor_user_id=actor_user_id, actor_role=actor_role,
@@ -59,6 +68,9 @@ def process_invoice(
         source_type=extraction.get("source_type"),
         overall_conf=conf,
     )
+    # Persist the full extracted payload (incl. per-field confidence) so the
+    # review UI can show extracted values and mark low-confidence fields later.
+    recorder.store_extraction(run_id, extraction)
 
     validation = validate(extraction, run_id=run_id)
 
@@ -81,4 +93,7 @@ def process_invoice(
         "extraction": extraction,
         "validation": validation,
         "decision": decision,
+        # The append-only trail this run emitted, oldest first — lets the UI
+        # replay the real stage events for the live run view (handover §4.2).
+        "events": recorder.fetch_run_events(run_id),
     }

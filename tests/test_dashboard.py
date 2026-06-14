@@ -95,3 +95,22 @@ def test_trends_returns_buckets(client, reset_db):
 @requires_db
 def test_summary_forbidden_for_clerk(client, reset_db):
     assert client.get("/dashboard/summary", headers=_hdr("clerk", CLERK)).status_code == 403
+
+
+@requires_db
+def test_kpis_forbidden_for_clerk(client, reset_db):
+    assert client.get("/dashboard/kpis", headers=_hdr("clerk", CLERK)).status_code == 403
+
+
+@requires_db
+def test_kpis_values_match_verdicts(client, reset_db):
+    _commit("INV-1", _PASS)      # APPROVE (draws PO-5001 down)
+    _commit("INV-2", _STRICT)    # FLAG over_authority
+    _commit("INV-3", _STRICT)    # FLAG over_authority
+    body = client.get("/dashboard/kpis", headers=_hdr("manager", MGR)).json()
+    assert body["totals"] == {"verdicts": 3, "approve": 1, "flag": 2, "reject": 0}
+    assert abs(body["kpis"]["stp_rate"]["value"] - 1 / 3) < 1e-9
+    # Touchless savings = approve_count × (manual_cost − auto_cost) = 1 × (900 − 170).
+    assert body["kpis"]["touchless_savings"]["value"] == 730.0
+    assert body["flags_by_reason"] == {"over_authority": 2}
+    assert body["costs"]["manual_cost_per_invoice"] == 900.0

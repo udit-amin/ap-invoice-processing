@@ -201,3 +201,30 @@ CREATE TABLE IF NOT EXISTS review_actions (
 );
 CREATE INDEX IF NOT EXISTS idx_review_actions_run ON review_actions (run_id);
 CREATE INDEX IF NOT EXISTS idx_review_actions_invoice ON review_actions (invoice_number);
+
+-- --------------------------------------------------------------------------
+-- UI support (v4)
+-- --------------------------------------------------------------------------
+-- Cost constants for the touchless-savings KPI. Governance-as-data: editable
+-- via the seed (or a future PUT /policy) with no redeploy. Defaults
+-- (manual ₹900 ≈ $11, auto ₹170 ≈ $2) are backfilled by the seed upsert.
+ALTER TABLE policy_config ADD COLUMN IF NOT EXISTS manual_cost_per_invoice NUMERIC(14, 2);
+ALTER TABLE policy_config ADD COLUMN IF NOT EXISTS auto_cost_per_invoice   NUMERIC(14, 2);
+
+-- The full extracted payload (fields + per-field extraction_confidence) so the
+-- review queue can show extracted values and mark low-confidence fields after
+-- the run, without re-extracting. Written post-extraction by the orchestrator.
+ALTER TABLE pipeline_runs ADD COLUMN IF NOT EXISTS extraction JSONB;
+
+-- The original uploaded PDF bytes, kept in Postgres (single source of truth; no
+-- S3 dependency yet — fixtures are 2–500 KB). Lets the review UI show the
+-- original scan beside the extracted fields. One row per run; the large bytes
+-- live in their own table so normal run reads never pull them.
+CREATE TABLE IF NOT EXISTS invoice_files (
+    run_id       UUID PRIMARY KEY REFERENCES pipeline_runs (run_id),
+    filename     TEXT,
+    content_type TEXT NOT NULL DEFAULT 'application/pdf',
+    bytes        BYTEA NOT NULL,
+    created_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
+    tenant_id    UUID NOT NULL DEFAULT '11fbb063-9253-5c06-8412-f2aa4bb88084'
+);

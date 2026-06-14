@@ -46,11 +46,11 @@ app/
     router.py             GET /invoices/runs, GET /invoices/runs/{run_id}
     models.py             Tenant-scoped run list/detail (clerk = own, manager = all)
   review/
-    router.py             GET /review/queue, POST /review/{run_id}/action
-    service.py            Effectful approve (PO draw-down) / reject / escalate
+    router.py             GET /review/queue + /{run_id} (+ /file, /preview), POST /review/{run_id}/action
+    service.py            Effectful approve (PO draw-down) / reject / escalate; review-detail read
   dashboard/
-    router.py             GET /dashboard/summary, /trends (manager-only)
-    models.py             Verdict-mix + daily-trend aggregates
+    router.py             GET /dashboard/summary, /trends, /kpis (manager-only)
+    models.py             Verdict-mix + daily-trend aggregates + headline KPIs
   policy/
     router.py             GET /policy, PUT /policy (manager-only)
     service.py            Validate + version-bump + audit policy edits
@@ -78,16 +78,28 @@ app/
     commit.py             Race-safe PO balance update + verdict persistence
   governance/
     recorder.py           Append-only audit trail (runs, events, reports) + actor identity
+  ingest/
+    worker.py             Landing → process → archive (YYYYMMDD); simulates the AWS pickup worker
   generate/
     invoice_generator.py     v0 synthetic PDFs (extraction tests)
     invoice_generator_v1.py  v1 synthetic PDFs (validation tests)
+ui/                       Streamlit front end (v4) — thin client over the API
+  app.py                  Login gate + role-driven st.navigation + sidebar
+  api_client.py           One fn per endpoint + bearer + human-label translation
+  session.py              Token + current user in st.session_state
+  views/                  run_view, batch_ingest, decisions, review_queue, dashboard, policy (one render() each)
+  components/             decision_card, stage_tracker, invoice_detail
 validate_all.py           CLI harness — runs all 11 invoices, prints the matrix + verdicts
+scripts/
+  seed_demo_history.py    Back-dated runs (+ stored files) so the dashboard isn't empty
 docker-compose.yml        Local Postgres
 .env.example              Documented environment variables
-CHANGELOG.md              Version history (v1 → v3.2)
+CHANGELOG.md              Version history (v1 → v4)
 CLAUDE.md                 Repo guide + invariants for contributors / AI agents
 docs/
   API.md                  Detailed per-endpoint usage reference (curl + shapes)
+  ARCHITECTURE.md         AWS deployment architecture (topology, flows, trade-offs)
+  OPERATIONS.md           Deploy, configure, run the worker, monitor, runbooks
   MANUAL_TESTING.md       Step-by-step manual test guide
   QUERYING_THE_DB.md      How to inspect the database
 tests/
@@ -100,7 +112,10 @@ tests/
   test_permissions.py     Route role-guard matrix (no infra)
   test_invoices.py        Run list/detail scoping (skip-if-down)
   test_review.py          Review queue + effectful approve/reject/escalate (skip-if-down)
-  test_dashboard.py       Dashboard aggregates + clerk 403 (skip-if-down)
+  test_dashboard.py       Dashboard aggregates + KPIs + clerk 403 (skip-if-down)
+  test_pipeline_events.py /invoices/process events + file/extraction persistence (skip-if-down)
+  test_ui_labels.py       UI translation layer (stage mapping + label maps; no infra)
+  test_ingest.py          Ingest worker date partitioning + landing→archive sweep (no infra)
   test_policy.py          Live policy edit flips next verdict (skip-if-down)
 ```
 
@@ -159,9 +174,13 @@ uvicorn app.main:app --reload
 | `GET  /invoices/runs` | List processed runs (clerk → own, manager → all; `?verdict=`) | clerk · manager |
 | `GET  /invoices/runs/{run_id}` | One run's detail (run + verdict + events) | clerk · manager |
 | `GET  /review/queue` | Flagged runs awaiting a human decision | clerk · manager |
+| `GET  /review/{run_id}` | Flagged-run review context (drivers, fields, line side-by-side) | clerk · manager |
+| `GET  /review/{run_id}/file` | The original uploaded PDF (for the low-confidence scan view) | clerk · manager |
+| `GET  /review/{run_id}/preview` | A rendered PNG of a source page (inline preview) | clerk · manager |
 | `POST /review/{run_id}/action` | `approve` (draws PO down) / `reject` / `escalate` | clerk · manager |
 | `GET  /dashboard/summary` | Verdict mix, review backlog, totals | manager |
 | `GET  /dashboard/trends` | Per-day verdict counts (`?days=`) | manager |
+| `GET  /dashboard/kpis` | Headline KPIs + flag/rejection breakdowns (`?days=`) | manager |
 | `GET  /policy` | Current governance policy | manager |
 | `PUT  /policy` | Edit ceiling / confidence / severity map (audited) | manager |
 | `GET  /audit/{invoice_number}` | Governance trail + latest verdict (incl. actor) | manager |
@@ -175,14 +194,14 @@ Two roles: **clerk** (uploads/processes invoices, reviews) and **manager**
 (reviews, dashboard, policy, audit). Protected routes require an `Authorization:
 Bearer <token>` header; a clerk hitting a manager route (or vice-versa) gets
 **403**, a missing/invalid token gets **401**. Four demo users are seeded —
-clerks `priya@acmecorp.com` / `rahul@acmecorp.com` (`demo-clerk-1` / `-2`),
-managers `anjali@acmecorp.com` / `vikram@acmecorp.com` (`demo-mgr-1` / `-2`).
+clerks `priya@zamp.ai` / `rahul@zamp.ai` (`demo-clerk-1` / `-2`),
+managers `anjali@zamp.ai` / `vikram@zamp.ai` (`demo-mgr-1` / `-2`).
 
 ```bash
 # 1) clerk logs in and processes an invoice → run is stamped with the clerk
 TOKEN=$(curl -s -X POST http://localhost:8000/auth/login \
   -H 'Content-Type: application/json' \
-  -d '{"email":"priya@acmecorp.com","password":"demo-clerk-1"}' \
+  -d '{"email":"priya@zamp.ai","password":"demo-clerk-1"}' \
   | python3 -c "import sys,json;print(json.load(sys.stdin)['access_token'])")
 
 RUN=$(curl -s -X POST http://localhost:8000/invoices/process \
@@ -193,7 +212,7 @@ RUN=$(curl -s -X POST http://localhost:8000/invoices/process \
 # 2) manager reviews the flagged run and approves it (draws the PO down)
 MGR=$(curl -s -X POST http://localhost:8000/auth/login \
   -H 'Content-Type: application/json' \
-  -d '{"email":"anjali@acmecorp.com","password":"demo-mgr-1"}' \
+  -d '{"email":"anjali@zamp.ai","password":"demo-mgr-1"}' \
   | python3 -c "import sys,json;print(json.load(sys.stdin)['access_token'])")
 
 curl -s http://localhost:8000/review/queue -H "Authorization: Bearer $MGR" | python3 -m json.tool
@@ -205,12 +224,86 @@ curl -s -X POST "http://localhost:8000/review/$RUN/action" \
 curl -s http://localhost:8000/dashboard/summary -H "Authorization: Bearer $MGR" | python3 -m json.tool
 ```
 
-`/invoices/process` returns `{run_id, extraction, validation, decision}`. Every
-run and review action is recorded to the append-only governance trail in Postgres
-(`pipeline_runs`, `governance_events`, `validation_reports`, `verdicts`,
+`/invoices/process` returns `{run_id, extraction, validation, decision, events}`.
+Every run and review action is recorded to the append-only governance trail in
+Postgres (`pipeline_runs`, `governance_events`, `validation_reports`, `verdicts`,
 `review_actions`), each stamped with the acting user (`actor_user_id`,
 `actor_role`, `action_type`). Audit writes are best-effort — a logging failure
 never breaks the response.
+
+## The UI (v4)
+
+A Streamlit front end in `ui/` — a **thin client** over the API (it calls
+endpoints and renders; no verdict/tolerance logic lives in the UI). Run it
+alongside the API:
+
+```bash
+# API on :8000 (see above), then in another shell:
+API_BASE_URL=http://localhost:8000 .venv/bin/streamlit run ui/app.py
+# optional: pre-load a few days of history so the dashboard isn't empty
+.venv/bin/python scripts/seed_demo_history.py
+```
+
+`API_BASE_URL` (default `http://localhost:8000`) is the only deployment knob —
+point it at the AWS backend to run the same UI against production. Log in as any
+seeded user; the sidebar shows only the pages your role can use:
+
+| Page | clerk | manager | What it does |
+|------|:---:|:---:|------|
+| **Run view** | ✅ | — | Upload a PDF → the seven stages light up from the **real** governance events → decision card + "what the system saw" |
+| **Batch ingest** | ✅ | — | Process every PDF in a server-side folder through the pipeline → progress + a results table |
+| **Review queue** | ✅ | ✅ | Flagged items (oldest-first) with a distinct view per flag type: line-variance side-by-side, over-ceiling amount, low-confidence scan + flagged fields → approve / reject / escalate |
+| **Processed** | ✅ | ✅ | Every AI decision (clerk → own, manager → all) — monitor it or **manually reject (override)** |
+| **Dashboard** | — | ✅ | Five KPI cards (+ an honest quality-monitoring placeholder), flag/rejection breakdowns, a 30-day trend, and a filterable runs table with an audit drill-in |
+| **Policy** | — | ✅ | Edit the auto-approve ceiling / confidence gate live (a subsequent fresh run reflects it) |
+
+The run view's stage replay paces the **real** events the backend emitted (the
+pipeline itself runs in well under a second) — no timings or statuses are
+invented. Quality KPIs (false-approve / override) are shown as an honest
+"coming soon" placeholder rather than fabricated, since they need a downstream
+ground-truth signal.
+
+## Automated ingestion & deployment
+
+An ingestion worker simulates the AWS pickup flow — invoices land in one place,
+get processed, and are archived by date:
+
+```bash
+.venv/bin/python -m app.ingest.worker --seed
+# demo fixtures → data/landing/ → pipeline → data/archive/<YYYYMMDD>/
+```
+
+It sweeps a *landing* folder, runs each PDF through the **same** pipeline as the
+UI (stamped as the system actor), and moves it to a date-partitioned *archive*
+folder; a file that fails to process is left for retry. For how this maps to AWS
+(ALB · ECS Fargate · RDS · S3 landing/archive · scheduled worker · Secrets
+Manager · Bedrock/Anthropic · CloudWatch) and how to operate it, see
+**[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)** and
+**[docs/OPERATIONS.md](docs/OPERATIONS.md)**.
+
+### Live deployment (Render)
+
+The whole stack deploys from one repo via a [`render.yaml`](render.yaml)
+Blueprint: a managed Postgres plus two web services built from a single
+[`Dockerfile`](Dockerfile) — `ap-api` (`uvicorn app.main:app`) and `ap-ui`
+(`streamlit run ui/app.py`). The browser only talks to the Streamlit URL; the UI
+calls the API server-side, so there's **no CORS** to configure. The API
+self-applies the schema and seeds reference data + demo users on first boot.
+
+```text
+browser → ap-ui (Streamlit, public) → ap-api (FastAPI) → ap-invoices-db (Postgres)
+```
+
+1. Render → **New → Blueprint** → pick this repo (creates the DB + both services).
+2. Set `ANTHROPIC_API_KEY` on `ap-api` (secret); after the first deploy, set
+   `ap-ui`'s `API_BASE_URL` to `ap-api`'s URL (e.g. `https://ap-api.onrender.com`).
+3. `ap-api` → Shell → `python scripts/seed_demo_history.py` so the dashboard isn't
+   empty. Then open the `ap-ui` URL and log in.
+
+**The grader opens the `ap-ui` URL.** Logins: `priya@zamp.ai` / `demo-clerk-1`
+(clerk), `anjali@zamp.ai` / `demo-mgr-1` (manager). The 5-minute video script and
+the live runbook (warm the URL, reset state, which PDFs to upload) are in
+**[docs/DEMO.md](docs/DEMO.md)**.
 
 ## The validation checks
 

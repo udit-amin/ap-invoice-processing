@@ -2,7 +2,8 @@
 
 Guidance for Claude Code (and humans) working in this repo. Keep this current
 when architecture or invariants change. The user-facing overview is `README.md`;
-the endpoint reference is `docs/API.md`; version history is `CHANGELOG.md`.
+the endpoint reference is `docs/API.md`; version history is `CHANGELOG.md`; AWS
+deployment + ops live in `docs/ARCHITECTURE.md` / `docs/OPERATIONS.md`.
 
 ## What this is
 
@@ -27,10 +28,20 @@ PDF ─ingest→ extract ─→ match ─→ validate ─→ decide ─→ verdi
 - `app/governance/recorder.py` — append-only trail (runs, events, reports) +
   actor identity helpers.
 - `app/pipeline/orchestrator.py` — `process_invoice(...)`; the single entry the
-  API route **and** `validate_all.py` both call, so the trail is identical.
+  API route, `validate_all.py`, **and** the ingest worker all call, so the trail
+  is identical.
+- `app/ingest/worker.py` — landing → `process_invoice` → archive partitioned by
+  `YYYYMMDD` (same pipeline, stamped system; simulates the AWS S3 pickup worker).
 - Routers: `app/pipeline` (`/extract`, `/invoices/process`), `app/invoices`
-  (runs), `app/review` (queue + actions), `app/dashboard`, `app/policy`,
-  `app/audit`, `app/auth`. Wired in `app/main.py`.
+  (runs), `app/review` (queue + actions + `/{run_id}` detail + `/file` + `/preview`),
+  `app/dashboard` (`/summary`, `/trends`, `/kpis`), `app/policy`, `app/audit`,
+  `app/auth`. Wired in `app/main.py`.
+- `ui/` — Streamlit **thin client** (v4) over the API: `api_client.py` (one fn
+  per endpoint + the human-label translation layer), `session.py`, `app.py`
+  (role-based `st.navigation`), `views/`, `components/`. `API_BASE_URL` (env) is
+  the only backend knob. The run view replays the real `events` array returned by
+  `/invoices/process`; the source PDF + per-field extraction are persisted
+  (`invoice_files`, `pipeline_runs.extraction`) so the review queue can show them.
 
 **Separation of concerns:** validation *gathers facts*; the engine *applies
 policy*. The validator must never mention a verdict; the engine must never
@@ -57,6 +68,10 @@ re-derive facts. `verdicts` is the one place a verdict is written.
 7. **Actor on the trail.** User-initiated writes stamp `actor_user_id` /
    `actor_role` / `action_type`; thread the `CurrentUser` through, defaulting to
    the system actor (None) for the harness.
+8. **No business logic in the UI.** `ui/` calls endpoints and renders — it never
+   computes a verdict, tolerance, or confidence. New aggregations/KPIs are
+   server-side (`dashboard/models.py`); the human-label mapping is the one bit of
+   logic that lives in the UI (`api_client.py`), and it's pure presentation.
 
 ## Conventions (pragmatic-hybrid — deliberate)
 
@@ -79,12 +94,15 @@ docker compose up -d db                 # Postgres (DSN postgresql://ap:ap@local
 .venv/bin/python -m app.db.seed         # schema + vendors/POs/policy
 .venv/bin/python -m app.users.seed      # 4 demo users
 .venv/bin/python -m uvicorn app.main:app --reload   # API (self-bootstraps on startup too)
+API_BASE_URL=http://localhost:8000 .venv/bin/streamlit run ui/app.py   # UI (v4)
+.venv/bin/python -m app.ingest.worker --seed        # landing → process → archive/YYYYMMDD
+.venv/bin/python scripts/seed_demo_history.py       # back-dated demo data (dashboard not empty)
 .venv/bin/python -m pytest -q           # full suite
 .venv/bin/python validate_all.py --dry-run          # 11-invoice matrix, no model calls
 ```
 
-Demo users: `priya@/rahul@acmecorp.com` (clerk, `demo-clerk-1/2`),
-`anjali@/vikram@acmecorp.com` (manager, `demo-mgr-1/2`).
+Demo users: `priya@/rahul@zamp.ai` (clerk, `demo-clerk-1/2`),
+`anjali@/vikram@zamp.ai` (manager, `demo-mgr-1/2`).
 
 ## Tests
 

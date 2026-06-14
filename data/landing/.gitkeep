@@ -1,0 +1,2 @@
+# Ingest worker landing area — drop invoice PDFs here (or run the worker with
+# --seed). Files are moved to data/archive/<YYYYMMDD>/ after processing.

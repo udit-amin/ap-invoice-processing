@@ -188,6 +188,90 @@ def record_validation_report(
         log.warning("governance record_validation_report failed: %s", exc)
 
 
+def store_extraction(run_id: str | None, extraction: dict[str, Any] | None) -> None:
+    """Persist the full extracted payload (fields + per-field confidence) on the
+    run, so the review UI can later show extracted values and mark low-confidence
+    fields without re-extracting. Best-effort — never raises."""
+    if run_id is None or extraction is None:
+        return
+    try:
+        with cursor() as cur:
+            cur.execute(
+                "UPDATE pipeline_runs SET extraction = %s WHERE run_id = %s",
+                (Jsonb(extraction), run_id),
+            )
+    except Exception as exc:  # noqa: BLE001
+        log.warning("governance store_extraction failed: %s", exc)
+
+
+def store_invoice_file(
+    run_id: str | None,
+    data: bytes | None,
+    filename: str | None = None,
+    content_type: str = "application/pdf",
+) -> None:
+    """Persist the original uploaded PDF bytes for a run (one row per run, kept in
+    Postgres). Lets the review UI show the original scan. Best-effort — a storage
+    failure must not break the pipeline it observes."""
+    if run_id is None or not data:
+        return
+    try:
+        with cursor() as cur:
+            cur.execute(
+                """INSERT INTO invoice_files (run_id, filename, content_type, bytes)
+                   VALUES (%s, %s, %s, %s)
+                   ON CONFLICT (run_id) DO NOTHING""",
+                (run_id, filename, content_type, data),
+            )
+    except Exception as exc:  # noqa: BLE001
+        log.warning("governance store_invoice_file failed: %s", exc)
+
+
+def fetch_invoice_file(run_id: str) -> tuple[str | None, str, bytes] | None:
+    """Return ``(filename, content_type, bytes)`` for a run's stored upload, or
+    None if none exists. A read — raises if the store is unreachable."""
+    with cursor() as cur:
+        cur.execute(
+            "SELECT filename, content_type, bytes FROM invoice_files WHERE run_id = %s",
+            (run_id,),
+        )
+        row = cur.fetchone()
+    if row is None:
+        return None
+    return row[0], row[1], bytes(row[2])
+
+
+def fetch_run_events(run_id: str | None) -> list[dict[str, Any]]:
+    """Return a run's append-only governance events, oldest first.
+
+    Shared by the pipeline orchestrator (to return the trail on the /process
+    response) and the run-detail read. Best-effort — returns [] if the store is
+    unreachable, since one caller is the pipeline itself."""
+    if run_id is None:
+        return []
+    try:
+        with cursor() as cur:
+            cur.execute(
+                """SELECT stage, status, detail, actor, actor_user_id,
+                          actor_role, action_type, created_at
+                   FROM governance_events WHERE run_id = %s ORDER BY event_id""",
+                (run_id,),
+            )
+            rows = cur.fetchall()
+    except Exception as exc:  # noqa: BLE001
+        log.warning("governance fetch_run_events failed: %s", exc)
+        return []
+    return [
+        {
+            "stage": stage, "status": status, "detail": detail, "actor": actor,
+            "actor_user_id": str(auid) if auid else None,
+            "actor_role": arole, "action_type": atype,
+            "ts": ts.isoformat() if ts else None,
+        }
+        for (stage, status, detail, actor, auid, arole, atype, ts) in rows
+    ]
+
+
 def fetch_audit_trail(invoice_number: str) -> dict[str, Any]:
     """Reconstruct the audit trail for an invoice across all its runs.
 

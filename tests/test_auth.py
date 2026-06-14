@@ -32,10 +32,10 @@ requires_db = pytest.mark.skipif(
 
 # (email, password, role, name) — the four seed users (handover §2.2).
 DEMO_USERS = [
-    ("priya@acmecorp.com",  "demo-clerk-1", "clerk",   "Priya Nair"),
-    ("rahul@acmecorp.com",  "demo-clerk-2", "clerk",   "Rahul Sharma"),
-    ("anjali@acmecorp.com", "demo-mgr-1",   "manager", "Anjali Mehta"),
-    ("vikram@acmecorp.com", "demo-mgr-2",   "manager", "Vikram Iyer"),
+    ("priya@zamp.ai",  "demo-clerk-1", "clerk",   "Priya Nair"),
+    ("rahul@zamp.ai",  "demo-clerk-2", "clerk",   "Rahul Sharma"),
+    ("anjali@zamp.ai", "demo-mgr-1",   "manager", "Anjali Mehta"),
+    ("vikram@zamp.ai", "demo-mgr-2",   "manager", "Vikram Iyer"),
 ]
 
 
@@ -108,20 +108,20 @@ def test_login_returns_valid_jwt(client, email, password, role, name):
 
 @requires_db
 def test_login_bad_password_401(client):
-    r = client.post("/auth/login", json={"email": "priya@acmecorp.com", "password": "nope"})
+    r = client.post("/auth/login", json={"email": "priya@zamp.ai", "password": "nope"})
     assert r.status_code == 401
 
 
 @requires_db
 def test_login_unknown_user_401(client):
-    r = client.post("/auth/login", json={"email": "ghost@acmecorp.com", "password": "x"})
+    r = client.post("/auth/login", json={"email": "ghost@zamp.ai", "password": "x"})
     assert r.status_code == 401
 
 
 @requires_db
 def test_me_returns_current_user(client):
     tok = client.post(
-        "/auth/login", json={"email": "anjali@acmecorp.com", "password": "demo-mgr-1"},
+        "/auth/login", json={"email": "anjali@zamp.ai", "password": "demo-mgr-1"},
     ).json()["access_token"]
     r = client.get("/auth/me", headers={"Authorization": f"Bearer {tok}"})
     assert r.status_code == 200

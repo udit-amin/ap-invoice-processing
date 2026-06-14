@@ -252,7 +252,7 @@ class _Actor:
     user_id = "12121212-0000-0000-0000-000000000001"
     role = "clerk"
     name = "Priya Nair"
-    email = "priya@acmecorp.com"
+    email = "priya@zamp.ai"
 
 
 def test_audit_trail_records_actor(client, auth_header):

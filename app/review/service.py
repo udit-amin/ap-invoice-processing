@@ -75,6 +75,80 @@ def review_queue() -> list[dict[str, Any]]:
     ]
 
 
+def review_detail(run_id: str) -> dict[str, Any] | None:
+    """Full context for working a flagged run: the verdict (reason, drivers,
+    review_payload), the persisted extraction (fields + per-field confidence),
+    the 6-check evidence, and the per-line reconciliation detail for the
+    side-by-side view. Returns None if the run has no verdict.
+
+    Not owner-restricted — the review queue is global, so either role may open
+    any flagged item (unlike the owner-scoped /invoices/runs/{id})."""
+    with cursor() as cur:
+        cur.execute(
+            """SELECT v.verdict, v.reason, v.drivers, v.review_payload,
+                      v.confidence_overall, v.policy_version, v.invoice_total,
+                      v.matched_po_id, v.auto_approve_ceiling_applied,
+                      v.requires_human_review, v.decided_at,
+                      r.invoice_number, r.vendor_name, r.po_reference,
+                      r.source_type, r.overall_conf, r.extraction
+               FROM verdicts v
+               JOIN pipeline_runs r ON r.run_id = v.run_id
+               WHERE v.run_id = %s AND v.tenant_id = %s
+               ORDER BY v.decided_at DESC LIMIT 1""",
+            (run_id, config.TENANT_ID),
+        )
+        row = cur.fetchone()
+        if row is None:
+            return None
+        cur.execute(
+            """SELECT report FROM validation_reports
+               WHERE run_id = %s ORDER BY created_at DESC LIMIT 1""",
+            (run_id,),
+        )
+        rep = cur.fetchone()
+        cur.execute("SELECT EXISTS(SELECT 1 FROM invoice_files WHERE run_id = %s)", (run_id,))
+        has_file = cur.fetchone()[0]
+
+    (verdict, reason, drivers, review_payload, conf, pver, inv_total,
+     matched_po, ceiling, needs_review, decided, inv_no, vendor, po_ref,
+     source_type, overall_conf, extraction) = row
+
+    report = rep[0] if rep else None
+    checks = report.get("checks") if report else None
+    line_detail = None
+    if checks:
+        line_detail = next(
+            (c.get("detail") for c in checks if c.get("check") == "line_reconciliation"),
+            None,
+        )
+
+    return {
+        "run_id": run_id,
+        "invoice_number": inv_no,
+        "vendor_name": vendor,
+        "po_reference": po_ref,
+        "source_type": source_type,
+        "verdict": verdict,
+        "reason": reason,
+        "drivers": drivers,
+        "review_payload": review_payload,
+        "requires_human_review": needs_review,
+        "confidence_overall": (
+            float(conf) if conf is not None
+            else float(overall_conf) if overall_conf is not None else None
+        ),
+        "policy_version": pver,
+        "invoice_total": float(inv_total) if inv_total is not None else None,
+        "matched_po_id": matched_po,
+        "auto_approve_ceiling_applied": float(ceiling) if ceiling is not None else None,
+        "decided_at": decided.isoformat() if decided else None,
+        "extraction": extraction,
+        "checks": checks,
+        "line_reconciliation": line_detail,
+        "has_file": has_file,
+    }
+
+
 def apply_review_action(run_id: str, action: str, note: str | None, actor: object) -> dict[str, Any]:
     """Apply a human review decision to a run. Returns a result summary.
 
