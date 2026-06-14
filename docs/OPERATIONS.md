@@ -47,6 +47,24 @@ python -m app.db.seed       # vendors, POs + line items, policy_config (incl. co
 python -m app.users.seed    # the demo users (replace with real users in prod)
 ```
 
+**Render (the live demo deployment)** — the same image, driven by `render.yaml`
+(Blueprint) at the repo root: a managed Postgres + two web services, `ap-api`
+(`uvicorn`) and `ap-ui` (`streamlit`). UI → API is server-side, so there's no
+CORS. Steps:
+
+1. Render → **New → Blueprint** → pick the repo (creates DB + both services).
+2. Set `ANTHROPIC_API_KEY` on `ap-api` (secret). After the first deploy, set
+   `ap-ui`'s `API_BASE_URL` to `ap-api`'s public URL (e.g.
+   `https://ap-api.onrender.com`) — Render's `fromService` gives only the bare
+   host, and `api_client` needs the full `https://` URL — then redeploy `ap-ui`.
+3. First API boot self-applies the schema + seeds reference data + the 4 users.
+4. `ap-api` → **Shell** → `python scripts/seed_demo_history.py` (no key needed)
+   for ~5 days of back-dated history so the dashboard isn't empty.
+
+The grader opens the **`ap-ui`** URL. Free-tier services sleep after ~15 min idle
+(~30–60 s cold start) — warm both URLs before a demo, or use the Starter tier for
+the grading window. The video script + live runbook are in [DEMO.md](DEMO.md).
+
 **Local / demo**
 
 ```bash

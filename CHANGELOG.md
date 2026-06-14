@@ -5,6 +5,31 @@ All notable changes to this project are documented here. The format follows
 labelled milestones (`v1`, `v2`, `v3.x`) rather than on a fixed release cadence;
 each PR adds an entry.
 
+## [v4.2] — Live deployment (Render) + demo kit
+
+Makes the process *live and runnable* at a public URL and prepares the demo. No
+application code changes — the app already reads every knob from the environment
+and self-bootstraps; this round is deploy artifacts + demo tooling + docs.
+
+### Added
+- **One-image container** — a repo-root [`Dockerfile`](Dockerfile) (+ `.dockerignore`)
+  that runs both roles: the API (`uvicorn`, default CMD) and the UI (`streamlit`,
+  command overridden). Realises the "one image, multiple entrypoints" story.
+- **Render Blueprint** — [`render.yaml`](render.yaml): a managed Postgres plus two
+  web services (`ap-api`, `ap-ui`). UI → API is server-side, so there's no CORS;
+  the grader only needs the `ap-ui` URL. The API self-applies schema + seeds on boot.
+- **Live-demo invoice generator** — `scripts/make_live_demo_invoices.py` mints
+  fresh-numbered PDFs (Dell→APPROVE, Globex→REJECT, TechGear→FLAG) into
+  `data/demo_live/`, so the live happy-path upload is a clean APPROVE rather than a
+  duplicate. Verdicts verified end-to-end through the real pipeline.
+- **[docs/DEMO.md](docs/DEMO.md)** — the operational-flow one-pager, a timed 5-minute
+  video script (happy path + edge cases + manager + close), the edge-case table, and a
+  live runbook (warm the URL, reset state, which files to upload).
+
+### Changed
+- `README.md` (a "Live deployment (Render)" section) and `docs/OPERATIONS.md` §3 (the
+  concrete Render path beside the AWS outline) document the deploy.
+
 ## [v4.1] — Folder ingestion, decision monitoring, AWS docs
 
 A demo-readiness round on top of v4.

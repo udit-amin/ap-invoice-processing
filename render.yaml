@@ -1,0 +1,60 @@
+# Render Blueprint — the whole stack from one repo.
+#
+#   browser → ap-ui (Streamlit, public) → ap-api (FastAPI, public) → ap-invoices-db
+#
+# UI → API is server-to-server (ui/api_client.py uses requests), so there is no
+# browser CORS to configure; the grader only needs the ap-ui URL. The API
+# self-applies the schema and seeds reference data + demo users on first boot
+# (app/main.py lifespan), so a fresh empty database just works.
+#
+# Deploy: Render → New → Blueprint → pick this repo. Then:
+#   1. Set ANTHROPIC_API_KEY on ap-api (it's sync:false, so never in git).
+#   2. After the first deploy, copy ap-api's URL into ap-ui's API_BASE_URL and
+#      redeploy ap-ui (Render exposes only the bare host via fromService, and
+#      api_client needs the full https:// URL).
+#   3. Open ap-api → Shell → `python scripts/seed_demo_history.py` to back-date
+#      ~5 days of history so the dashboard isn't empty (no API key needed).
+
+databases:
+  - name: ap-invoices-db
+    databaseName: ap_invoices
+    user: ap
+    plan: free
+
+services:
+  # --- API ---------------------------------------------------------------
+  - type: web
+    name: ap-api
+    runtime: docker
+    plan: free
+    dockerfilePath: ./Dockerfile
+    dockerCommand: uvicorn app.main:app --host 0.0.0.0 --port $PORT
+    healthCheckPath: /health
+    envVars:
+      - key: DATABASE_URL
+        fromDatabase:
+          name: ap-invoices-db
+          property: connectionString
+      - key: JWT_SECRET
+        generateValue: true
+      - key: ENVIRONMENT
+        value: production
+      - key: PYTHONUNBUFFERED
+        value: "1"
+      # Secret — set in the Render dashboard, never committed.
+      - key: ANTHROPIC_API_KEY
+        sync: false
+
+  # --- UI ----------------------------------------------------------------
+  - type: web
+    name: ap-ui
+    runtime: docker
+    plan: free
+    dockerfilePath: ./Dockerfile
+    dockerCommand: streamlit run ui/app.py --server.port $PORT --server.address 0.0.0.0 --server.headless true --browser.gatherUsageStats false
+    healthCheckPath: /_stcore/health
+    envVars:
+      # Set to ap-api's public URL after the first deploy, e.g.
+      # https://ap-api.onrender.com  (full scheme + host; api_client uses it verbatim).
+      - key: API_BASE_URL
+        sync: false

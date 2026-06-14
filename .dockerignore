@@ -1,0 +1,24 @@
+# Keep the build context (and image) lean, and keep secrets / local state out.
+.git
+.venv
+__pycache__
+**/__pycache__
+*.pyc
+.pytest_cache
+.DS_Store
+
+# Secrets and local-only env (Render injects env vars itself).
+.env
+
+# Local runtime state — the worker's archive and any landing PDFs.
+data/archive
+data/landing/*.pdf
+
+# The case-study brief and any local PDFs that aren't fixtures.
+asa-case-study-*.pdf
+
+# Plans / editor cruft.
+.claude
+
+# NOTE: data/inputs/ is intentionally NOT ignored — the demo-history seeder and
+# the invoice generator need those fixtures in the image.

@@ -15,8 +15,9 @@ venv/
 # Editor / tooling
 .claude/
 
-# Generated data (PDFs are regenerated from app/generate/)
+# Generated data (PDFs are regenerated from app/generate/ + scripts/)
 data/inputs/*.pdf
+data/demo_live/*.pdf
 
 # Ingest worker landing/archive (runtime PDFs; landing dir kept via .gitkeep)
 data/landing/*.pdf

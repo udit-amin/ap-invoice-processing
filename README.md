@@ -281,6 +281,30 @@ Manager · Bedrock/Anthropic · CloudWatch) and how to operate it, see
 **[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)** and
 **[docs/OPERATIONS.md](docs/OPERATIONS.md)**.
 
+### Live deployment (Render)
+
+The whole stack deploys from one repo via a [`render.yaml`](render.yaml)
+Blueprint: a managed Postgres plus two web services built from a single
+[`Dockerfile`](Dockerfile) — `ap-api` (`uvicorn app.main:app`) and `ap-ui`
+(`streamlit run ui/app.py`). The browser only talks to the Streamlit URL; the UI
+calls the API server-side, so there's **no CORS** to configure. The API
+self-applies the schema and seeds reference data + demo users on first boot.
+
+```text
+browser → ap-ui (Streamlit, public) → ap-api (FastAPI) → ap-invoices-db (Postgres)
+```
+
+1. Render → **New → Blueprint** → pick this repo (creates the DB + both services).
+2. Set `ANTHROPIC_API_KEY` on `ap-api` (secret); after the first deploy, set
+   `ap-ui`'s `API_BASE_URL` to `ap-api`'s URL (e.g. `https://ap-api.onrender.com`).
+3. `ap-api` → Shell → `python scripts/seed_demo_history.py` so the dashboard isn't
+   empty. Then open the `ap-ui` URL and log in.
+
+**The grader opens the `ap-ui` URL.** Logins: `priya@zamp.ai` / `demo-clerk-1`
+(clerk), `anjali@zamp.ai` / `demo-mgr-1` (manager). The 5-minute video script and
+the live runbook (warm the URL, reset state, which PDFs to upload) are in
+**[docs/DEMO.md](docs/DEMO.md)**.
+
 ## The validation checks
 
 The validator runs six checks; each returns `pass | fail | skip` with a
