@@ -310,10 +310,11 @@ the live runbook (warm the URL, reset state, which PDFs to upload) are in
 
 ### CI/CD (GitHub Actions)
 
-A `feature → main → staging → production` gitflow with test-gated deploys:
+A `feature → develop → staging → production` gitflow with test-gated deploys
+(`develop` is the repo's default/integration branch):
 
 - **CI** ([`.github/workflows/ci.yml`](.github/workflows/ci.yml)) runs on every PR
-  and push to `main` — a Postgres service, the full `pytest` suite, the
+  and push to `develop` — a Postgres service, the full `pytest` suite, the
   `validate_all --dry-run` verdict-matrix smoke, and a Docker build of the deploy image.
 - **CD** ([`.github/workflows/deploy.yml`](.github/workflows/deploy.yml)) runs on a
   merge into `staging` or `production`: it re-runs CI and, only if green, POSTs the

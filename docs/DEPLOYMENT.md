@@ -7,28 +7,29 @@ first-time Render setup see [OPERATIONS.md §3](OPERATIONS.md); for the demo, se
 ## Branch strategy
 
 ```
-feature/* ──PR──▶ main ──PR──▶ staging ──PR──▶ production
-                   │             │                │
-                   │             ▼                ▼
-                   │        Render staging   Render production
-                   ▼
-              CI only (no deploy)
+feature/* ──PR──▶ develop ──PR──▶ staging ──PR──▶ production
+                    │               │                │
+                    │               ▼                ▼
+                    │          Render staging   Render production
+                    ▼
+               CI only (no deploy)
 ```
 
-- **`main`** — integration branch. Every PR runs CI; merging does **not** deploy.
+- **`develop`** — integration branch (the repo default). Every PR runs CI; merging
+  does **not** deploy.
 - **`staging`** — pre-prod. Merging a PR here runs CI, then deploys the **staging**
   Render services. Use it to rehearse before showing production.
 - **`production`** — live. Merging a PR here runs CI, then deploys the **production**
   Render services (the URL you submit / demo).
 
-Promote by PR: `main → staging → production`. Each hop re-runs the suite, so nothing
+Promote by PR: `develop → staging → production`. Each hop re-runs the suite, so nothing
 reaches production without passing tests.
 
 ## Pipelines (GitHub Actions)
 
 | Workflow | Trigger | Does |
 |---|---|---|
-| [`ci.yml`](../.github/workflows/ci.yml) | every PR; push to `main`; called by deploy | Spins a Postgres service, seeds schema + reference data + users, runs `pytest`, runs the `validate_all --dry-run` verdict-matrix smoke, and builds the deploy Docker image |
+| [`ci.yml`](../.github/workflows/ci.yml) | every PR; push to `develop`; called by deploy | Spins a Postgres service, seeds schema + reference data + users, runs `pytest`, runs the `validate_all --dry-run` verdict-matrix smoke, and builds the deploy Docker image |
 | [`deploy.yml`](../.github/workflows/deploy.yml) | push to `staging` / `production`; manual | **Re-runs CI** (`uses: ci.yml`), then — only if green — POSTs the matching Render **deploy hook(s)** |
 
 CI runs with **no `ANTHROPIC_API_KEY`**, so the live-model tests skip cleanly and CI
@@ -39,16 +40,23 @@ stays free and deterministic. It runs on Python **3.12** to match the deploy ima
 CD is wired but inert until you add the secrets — `deploy.yml` logs a warning and
 skips (it never fails) when a hook is missing, so the PR is green meanwhile.
 
-**1. Create the Render environments.** The simplest path is two service sets:
-   - **production:** the [`render.yaml`](../render.yaml) Blueprint, with its services'
-     branch set to `production`.
-   - **staging:** a second set of services (e.g. `ap-api-staging`, `ap-ui-staging`,
-     `ap-invoices-db-staging`) connected to the `staging` branch. (For a single-env
-     demo you can skip staging and only wire production.)
+**1. Create the Render environments — one Blueprint does both.** Render → **New →
+   Blueprint** → pick this repo. [`render.yaml`](../render.yaml) defines **both**
+   environments in one apply: two databases (`ap-invoices-db-staging`,
+   `ap-invoices-db-prod`) and four web services — `ap-api-staging` / `ap-ui-staging`
+   (pinned to the `staging` branch) and `ap-api` / `ap-ui` (pinned to `production`).
+   Each service has `autoDeploy: false`, so a raw push never deploys.
+   - On each `*-api` service set `ANTHROPIC_API_KEY` (secret).
+   - After the first deploy, set each `*-ui` service's `API_BASE_URL` to its sibling
+     api URL (e.g. `https://ap-api-staging.onrender.com`).
+   - (For a single-env demo, delete the staging blocks from `render.yaml` and wire only
+     production. If your account allows just one free DB, share one — see the note in
+     `render.yaml`.)
 
-**2. Turn OFF Render auto-deploy** on each service (Settings → Build & Deploy →
-   Auto-Deploy → No). This hands the deploy decision to GitHub Actions, so **CI gates
-   every release** instead of Render deploying on raw push.
+**2. Auto-deploy is already OFF** (`autoDeploy: false` in the Blueprint). That hands
+   the deploy decision to GitHub Actions, so **CI gates every release** instead of
+   Render deploying on raw push. (If you created services by hand instead, set
+   Settings → Build & Deploy → Auto-Deploy → No.)
 
 **3. Copy each service's Deploy Hook** (Settings → Deploy Hook — a secret URL) into
    GitHub repo **Settings → Secrets and variables → Actions**:

@@ -21,9 +21,11 @@ changes — pipelines + branch strategy + docs.
   into `staging` / `production` (or manual dispatch): re-runs CI, then POSTs the
   matching Render **deploy hook(s)**. Skips gracefully (a warning, never a failure)
   when a hook secret is absent, so it's inert until configured.
-- **`feature → main → staging → production`** branch strategy, documented in
+- **`feature → develop → staging → production`** branch strategy, documented in
   [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md) (secrets, per-env Render services, disabling
-  Render auto-deploy so CI gates, and branch protection).
+  Render auto-deploy so CI gates, and branch protection). `render.yaml` provisions
+  **both** environments (staging + production service sets, branch-pinned,
+  `autoDeploy: false`) in one Blueprint.
 
 ### Fixed
 - Deploy docs now seed demo history **from a laptop via the database's External URL**
