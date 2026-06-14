@@ -283,27 +283,23 @@ Manager · Bedrock/Anthropic · CloudWatch) and how to operate it, see
 
 ### Live deployment (Render)
 
-The whole stack deploys from one repo via a [`render.yaml`](render.yaml)
-Blueprint: a managed Postgres plus two web services built from a single
-[`Dockerfile`](Dockerfile) — `ap-api` (`uvicorn app.main:app`) and `ap-ui`
-(`streamlit run ui/app.py`). The browser only talks to the Streamlit URL; the UI
-calls the API server-side, so there's **no CORS** to configure. The API
+One [`render.yaml`](render.yaml) Blueprint provisions **two environments** from a
+single [`Dockerfile`](Dockerfile) — staging (`ap-api-staging` + `ap-ui-staging`,
+branch `staging`) and production (`ap-api-prod` + `ap-ui-prod`, branch
+`production`), each with its own Postgres. The browser only talks to the Streamlit
+URL; the UI calls the API server-side, so there's **no CORS** to configure. The API
 self-applies the schema and seeds reference data + demo users on first boot.
 
 ```text
-browser → ap-ui (Streamlit, public) → ap-api (FastAPI) → ap-invoices-db (Postgres)
+browser → ap-ui-<env> (Streamlit, public) → ap-api-<env> (FastAPI) → ap-invoices-db-<env>
 ```
 
-1. Render → **New → Blueprint** → pick this repo (creates the DB + both services).
-2. Set `ANTHROPIC_API_KEY` on `ap-api` (secret); after the first deploy, set
-   `ap-ui`'s `API_BASE_URL` to `ap-api`'s URL (e.g. `https://ap-api.onrender.com`).
-3. Seed demo history so the dashboard isn't empty. Free-tier services have no
-   Shell, so run it from your laptop against the database's **External URL**
-   (Render → `ap-invoices-db` → Connect):
-   `DATABASE_URL='<external-url>?sslmode=require' .venv/bin/python scripts/seed_demo_history.py`
-   (no key needed). Then open the `ap-ui` URL and log in.
+Each service is `autoDeploy: false`; deploys are driven by the **CI-gated** GitHub
+deploy hooks (a merge into `staging`/`production` runs CI, then deploys that env).
+**Full step-by-step setup — apply the Blueprint, env vars, hooks, secrets — is in
+[docs/DEPLOYMENT.md](docs/DEPLOYMENT.md).**
 
-**The grader opens the `ap-ui` URL.** Logins: `priya@zamp.ai` / `demo-clerk-1`
+**The grader opens the `ap-ui-prod` URL.** Logins: `priya@zamp.ai` / `demo-clerk-1`
 (clerk), `anjali@zamp.ai` / `demo-mgr-1` (manager). The 5-minute video script and
 the live runbook (warm the URL, reset state, which PDFs to upload) are in
 **[docs/DEMO.md](docs/DEMO.md)**.

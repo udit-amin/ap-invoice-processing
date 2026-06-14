@@ -35,51 +35,72 @@ reaches production without passing tests.
 CI runs with **no `ANTHROPIC_API_KEY`**, so the live-model tests skip cleanly and CI
 stays free and deterministic. It runs on Python **3.12** to match the deploy image.
 
-## One-time setup to make CD live
+## First-time hosting on Render (detailed)
 
-CD is wired but inert until you add the secrets — `deploy.yml` logs a warning and
-skips (it never fails) when a hook is missing, so the PR is green meanwhile.
+One Blueprint provisions **both** environments. The resources (from
+[`render.yaml`](../render.yaml)):
 
-**1. Create the Render environments — one Blueprint does both.** Render → **New →
-   Blueprint** → pick this repo. [`render.yaml`](../render.yaml) defines **both**
-   environments in one apply: two databases (`ap-invoices-db-staging`,
-   `ap-invoices-db-prod`) and four web services — `ap-api-staging` / `ap-ui-staging`
-   (pinned to the `staging` branch) and `ap-api` / `ap-ui` (pinned to `production`).
-   Each service has `autoDeploy: false`, so a raw push never deploys.
-   - On each `*-api` service set `ANTHROPIC_API_KEY` (secret).
-   - After the first deploy, set each `*-ui` service's `API_BASE_URL` to its sibling
-     api URL (e.g. `https://ap-api-staging.onrender.com`).
-   - (For a single-env demo, delete the staging blocks from `render.yaml` and wire only
-     production. If your account allows just one free DB, share one — see the note in
-     `render.yaml`.)
+| | Staging (branch `staging`) | Production (branch `production`) |
+|---|---|---|
+| Database | `ap-invoices-db-staging` | `ap-invoices-db-prod` |
+| API | `ap-api-staging` | `ap-api-prod` |
+| UI | `ap-ui-staging` | `ap-ui-prod` |
 
-**2. Auto-deploy is already OFF** (`autoDeploy: false` in the Blueprint). That hands
-   the deploy decision to GitHub Actions, so **CI gates every release** instead of
-   Render deploying on raw push. (If you created services by hand instead, set
-   Settings → Build & Deploy → Auto-Deploy → No.)
+CD is wired but inert until the hook secrets exist — `deploy.yml` logs a warning and
+skips (never fails) when a hook is missing, so PRs stay green meanwhile.
 
-**3. Copy each service's Deploy Hook** (Settings → Deploy Hook — a secret URL) into
-   GitHub repo **Settings → Secrets and variables → Actions**:
+**1. Apply the Blueprint.** Render → **New → Blueprint** → connect GitHub → pick this
+   repo. Render reads `render.yaml` from the default branch (`develop`) and lists the 2
+   databases + 4 web services. Click **Apply**. First build takes a few minutes (it
+   builds the Docker image per service). Each `*-api` self-applies the schema + seeds
+   reference data + the 4 demo users on first boot.
 
-   | Secret | From |
+**2. Set the API secret.** On **`ap-api-staging`** and **`ap-api-prod`** → Environment →
+   add `ANTHROPIC_API_KEY` = your key (it's `sync: false`, so it's never in git). Save
+   (each redeploys).
+
+**3. Wire each UI to its API.** Copy each API service's URL from its Render page, then on
+   the matching UI service → Environment → set `API_BASE_URL` (full `https://`, no
+   trailing slash):
+   - `ap-ui-staging` → `https://ap-api-staging.onrender.com`
+   - `ap-ui-prod`    → `https://ap-api-prod.onrender.com`
+   (Exact host may carry a random suffix if the name was taken — copy the real one.)
+
+**4. Seed demo history per environment.** Free-tier services have no Shell, so run it
+   from your laptop against each database's **External URL** (Render → the db → Connect):
+   ```bash
+   DATABASE_URL='<staging-external-url>?sslmode=require' .venv/bin/python scripts/seed_demo_history.py
+   DATABASE_URL='<prod-external-url>?sslmode=require'    .venv/bin/python scripts/seed_demo_history.py
+   ```
+
+**5. Copy each Deploy Hook → GitHub secret.** On each service: Settings → **Deploy Hook**
+   (a secret URL). Add to GitHub repo **Settings → Secrets and variables → Actions**:
+
+   | GitHub secret | From service |
    |---|---|
-   | `RENDER_DEPLOY_HOOK_PRODUCTION_API` | `ap-api` deploy hook |
-   | `RENDER_DEPLOY_HOOK_PRODUCTION_UI`  | `ap-ui` deploy hook |
-   | `RENDER_DEPLOY_HOOK_STAGING_API`    | `ap-api-staging` deploy hook |
-   | `RENDER_DEPLOY_HOOK_STAGING_UI`     | `ap-ui-staging` deploy hook |
+   | `RENDER_DEPLOY_HOOK_STAGING_API`    | `ap-api-staging` |
+   | `RENDER_DEPLOY_HOOK_STAGING_UI`     | `ap-ui-staging` |
+   | `RENDER_DEPLOY_HOOK_PRODUCTION_API` | `ap-api-prod` |
+   | `RENDER_DEPLOY_HOOK_PRODUCTION_UI`  | `ap-ui-prod` |
 
-   Set only the ones you use; the rest stay skipped.
+   Auto-deploy is already **off** (`autoDeploy: false`), so deploys happen only through
+   these CI-gated hooks. Set only the ones you use; the rest stay skipped.
 
-**4. (Recommended) Protect the branches.** GitHub → Settings → Branches: require the
-   **CI** check to pass before merging into `staging` / `production`, and require a PR.
-   Optionally add a required reviewer on the `production` GitHub Environment for a
-   manual approval gate before the production deploy step runs.
+**6. (Recommended) Protect the branches.** GitHub → Settings → Branches: require the
+   **CI** check + a PR before merging into `staging` / `production`. Optionally add a
+   required reviewer on the `production` GitHub Environment for a manual approval gate.
+
+**Notes**
+- For a single-env demo, delete the `staging` blocks from `render.yaml` and wire only
+  production.
+- If your account allows only one free PostgreSQL, drop one db block and point both
+  envs at the survivor (see the note in `render.yaml`).
 
 ## What a release looks like
 
-1. Merge a PR into `staging` → `deploy.yml` runs CI → on green, POSTs the staging
-   hooks → Render rebuilds `ap-*-staging` from the `staging` branch.
-2. Verify on the staging URL.
-3. Open a PR `staging → production`, merge → same flow against production.
+1. Merge a PR into `staging` → `deploy.yml` runs CI → on green, POSTs the staging hooks
+   → Render rebuilds `ap-*-staging` from the `staging` branch.
+2. Verify on the `ap-ui-staging` URL.
+3. Open a PR `staging → production`, merge → same flow against `ap-*-prod`.
 4. Roll back by re-running `deploy.yml` (Actions → Deploy → Run workflow) on the last
    good commit, or via Render's "Rollback" on the service.

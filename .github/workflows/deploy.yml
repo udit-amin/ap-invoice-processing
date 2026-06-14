@@ -35,7 +35,7 @@ jobs:
           fi
 
           deployed=0
-          for pair in "ap-api:${API_HOOK}" "ap-ui:${UI_HOOK}"; do
+          for pair in "api:${API_HOOK}" "ui:${UI_HOOK}"; do
             name="${pair%%:*}"; hook="${pair#*:}"
             if [ -n "${hook}" ]; then
               echo "→ Triggering Render deploy for ${name} (${GITHUB_REF_NAME})…"
