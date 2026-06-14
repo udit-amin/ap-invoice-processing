@@ -15,5 +15,5 @@ passlib[bcrypt]>=1.7.4
 bcrypt<4.1                     # passlib 1.7.4 reads bcrypt.__about__ (removed in 4.1)
 
 # --- UI (v4) -----------------------------------------------------------------
-streamlit>=1.40                # role-based nav via st.navigation (≥1.36)
+streamlit[pdf]>=1.50           # st.navigation (role nav) + st.pdf (native PDF preview)
 requests>=2.31.0               # ui/api_client.py talks to the v3 API over HTTP

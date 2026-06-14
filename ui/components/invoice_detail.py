@@ -70,17 +70,14 @@ def line_table(line_detail: list[dict] | None) -> None:
     st.dataframe(pd.DataFrame(rows), hide_index=True, use_container_width=True)
 
 
-def render_scan(preview_png: bytes | None, pdf_bytes: bytes | None,
-                filename: str = "invoice.pdf") -> None:
-    """Show a rendered image of the source page (reliable across browsers) with a
-    download for the full PDF."""
-    if preview_png:
-        st.image(preview_png, use_container_width=True)
-    elif not pdf_bytes:
+def render_pdf(pdf_bytes: bytes | None, filename: str = "invoice.pdf",
+               height: int = 520, key: str | None = None) -> None:
+    """Inline preview of the original PDF — a native render, so a text invoice
+    shows selectable text and a scanned one shows its page image — with a
+    download. Used for every invoice, not just scans."""
+    if not pdf_bytes:
         st.caption("No source document stored for this run.")
         return
-    else:
-        st.caption("Preview unavailable — download to view the original.")
-    if pdf_bytes:
-        st.download_button("⬇ Download original", data=pdf_bytes,
-                           file_name=filename, mime="application/pdf")
+    st.pdf(pdf_bytes, height=height, key=key)
+    st.download_button("⬇ Download original", data=pdf_bytes, file_name=filename,
+                       mime="application/pdf", key=f"dl_{key}" if key else None)

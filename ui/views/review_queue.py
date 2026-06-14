@@ -13,13 +13,6 @@ from components import decision_card, invoice_detail
 _SEL = "review_sel"
 
 
-@st.cache_data(ttl=300, show_spinner=False)
-def _preview(run_id: str) -> bytes | None:
-    """The rendered source-page image is immutable per run — safe to cache (the
-    queue itself is never cached)."""
-    return api_client.get_review_preview(run_id)
-
-
 def render() -> None:
     st.title("📋 Review queue")
     try:
@@ -77,19 +70,18 @@ def _detail(run_id: str) -> None:
         a.metric("Invoice amount", fmt.rupees(d.get("invoice_total")))
         b.metric("Auto-approve ceiling", fmt.rupees(d.get("auto_approve_ceiling_applied")))
     elif queue_kind == "low_confidence":
-        a, b = st.columns(2)
-        with a:
-            st.markdown("**Extracted fields**")
-            invoice_detail.fields_panel(d.get("extraction"))
-        with b:
-            st.markdown("**Original scan**")
-            try:
-                preview = _preview(run_id)
-                pdf = api_client.get_review_file(run_id)
-            except api_client.ApiError:
-                preview = pdf = None
-            invoice_detail.render_scan(preview, pdf,
-                                       filename=f"{d.get('invoice_number', 'invoice')}.pdf")
+        st.markdown("**Extracted fields** — verify the flagged ones against the source below")
+        invoice_detail.fields_panel(d.get("extraction"))
+
+    # The source document, for every flagged invoice (a text invoice shows
+    # selectable text; a scan shows the page image).
+    st.markdown("**Source document**")
+    try:
+        pdf = api_client.get_review_file(run_id)
+    except api_client.ApiError:
+        pdf = None
+    invoice_detail.render_pdf(pdf, filename=f"{d.get('invoice_number', 'invoice')}.pdf",
+                              key=f"rev_{run_id}")
 
     with st.expander("Full decision detail"):
         decision_card.render(d)

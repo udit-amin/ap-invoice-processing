@@ -26,6 +26,11 @@ A demo-readiness round on top of v4.
 
 ### Changed
 - Demo users rebranded from `@acmecorp.com` to **`@zamp.ai`**.
+- **Source-document preview now renders the native PDF** (`st.pdf` /
+  `streamlit-pdf`) for *every* invoice — selectable text for text invoices (e.g.
+  DEL/2026/0419), the page image for scans — in the run view, the review detail
+  (all flag types, not just low-confidence), and the Processed view. Supersedes
+  the rasterised-image preview for the UI; `requirements` gains `streamlit[pdf]`.
 
 ## [v4] — Streamlit UI + dashboard KPIs
 

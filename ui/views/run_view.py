@@ -78,6 +78,8 @@ def _process(uploaded) -> None:
         if line_detail:
             st.markdown("**Line items vs PO**")
             invoice_detail.line_table(line_detail)
+        st.markdown("**Source document**")
+        invoice_detail.render_pdf(data, filename=uploaded.name, key="runview_pdf")
 
     with st.expander("Developer view (raw response)"):
         st.json(result)

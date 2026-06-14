@@ -9,7 +9,7 @@ import streamlit as st
 
 import api_client
 import fmt
-from components import decision_card
+from components import decision_card, invoice_detail
 
 
 def render() -> None:
@@ -66,6 +66,14 @@ def _detail(run: dict) -> None:
 
     st.subheader(f"{d.get('invoice_number')} · {d.get('vendor_name') or '—'}")
     decision_card.render(d)
+
+    st.markdown("**Source document**")
+    try:
+        pdf = api_client.get_review_file(run_id)
+    except api_client.ApiError:
+        pdf = None
+    invoice_detail.render_pdf(pdf, filename=f"{d.get('invoice_number', 'invoice')}.pdf",
+                              key=f"proc_{run_id}")
 
     last = run.get("last_action")
     if last:
