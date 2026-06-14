@@ -297,13 +297,30 @@ browser → ap-ui (Streamlit, public) → ap-api (FastAPI) → ap-invoices-db (P
 1. Render → **New → Blueprint** → pick this repo (creates the DB + both services).
 2. Set `ANTHROPIC_API_KEY` on `ap-api` (secret); after the first deploy, set
    `ap-ui`'s `API_BASE_URL` to `ap-api`'s URL (e.g. `https://ap-api.onrender.com`).
-3. `ap-api` → Shell → `python scripts/seed_demo_history.py` so the dashboard isn't
-   empty. Then open the `ap-ui` URL and log in.
+3. Seed demo history so the dashboard isn't empty. Free-tier services have no
+   Shell, so run it from your laptop against the database's **External URL**
+   (Render → `ap-invoices-db` → Connect):
+   `DATABASE_URL='<external-url>?sslmode=require' .venv/bin/python scripts/seed_demo_history.py`
+   (no key needed). Then open the `ap-ui` URL and log in.
 
 **The grader opens the `ap-ui` URL.** Logins: `priya@zamp.ai` / `demo-clerk-1`
 (clerk), `anjali@zamp.ai` / `demo-mgr-1` (manager). The 5-minute video script and
 the live runbook (warm the URL, reset state, which PDFs to upload) are in
 **[docs/DEMO.md](docs/DEMO.md)**.
+
+### CI/CD (GitHub Actions)
+
+A `feature → main → staging → production` gitflow with test-gated deploys:
+
+- **CI** ([`.github/workflows/ci.yml`](.github/workflows/ci.yml)) runs on every PR
+  and push to `main` — a Postgres service, the full `pytest` suite, the
+  `validate_all --dry-run` verdict-matrix smoke, and a Docker build of the deploy image.
+- **CD** ([`.github/workflows/deploy.yml`](.github/workflows/deploy.yml)) runs on a
+  merge into `staging` or `production`: it re-runs CI and, only if green, POSTs the
+  matching Render **deploy hook** — so nothing reaches production without passing tests.
+
+Setup (secrets, Render environments, branch protection) is in
+**[docs/DEPLOYMENT.md](docs/DEPLOYMENT.md)**.
 
 ## The validation checks
 

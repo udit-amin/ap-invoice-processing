@@ -5,6 +5,30 @@ All notable changes to this project are documented here. The format follows
 labelled milestones (`v1`, `v2`, `v3.x`) rather than on a fixed release cadence;
 each PR adds an entry.
 
+## [v4.3] — CI/CD + staging/production gitflow
+
+Test-gated continuous delivery on top of the Render deploy. No application code
+changes — pipelines + branch strategy + docs.
+
+### Added
+- **CI** ([`.github/workflows/ci.yml`](.github/workflows/ci.yml)) — on every PR and
+  push to `main`: a Postgres service container, schema + reference + user seeding,
+  the full `pytest` suite, the `validate_all --dry-run` verdict-matrix smoke, and a
+  Docker build of the deploy image. Runs on Python 3.12 (matches the image), with no
+  `ANTHROPIC_API_KEY` so the live-model tests skip and CI stays free/deterministic.
+  Exposed as a reusable workflow (`workflow_call`).
+- **CD** ([`.github/workflows/deploy.yml`](.github/workflows/deploy.yml)) — on a merge
+  into `staging` / `production` (or manual dispatch): re-runs CI, then POSTs the
+  matching Render **deploy hook(s)**. Skips gracefully (a warning, never a failure)
+  when a hook secret is absent, so it's inert until configured.
+- **`feature → main → staging → production`** branch strategy, documented in
+  [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md) (secrets, per-env Render services, disabling
+  Render auto-deploy so CI gates, and branch protection).
+
+### Fixed
+- Deploy docs now seed demo history **from a laptop via the database's External URL**
+  (free-tier Render has no Shell/SSH) — corrected in README, OPERATIONS, and DEMO.
+
 ## [v4.2] — Live deployment (Render) + demo kit
 
 Makes the process *live and runnable* at a public URL and prepares the demo. No
