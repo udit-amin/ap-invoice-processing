@@ -5,6 +5,29 @@ All notable changes to this project are documented here. The format follows
 labelled milestones (`v1`, `v2`, `v3.x`) rather than on a fixed release cadence;
 each PR adds an entry.
 
+## [v4.4] — Tax-presence check (7th validation check)
+
+Adds a tax control: an invoice must declare tax, otherwise it's flagged.
+
+### Added
+- **`tax_present` check** (`app/validate/checks.py`) — a **pure presence check** on the
+  extractor's `tax.treatment`: `separated`/`embedded` → pass, `none` → **fail (FLAG)**,
+  null/unknown → **skip**. It does no amount arithmetic and never touches the PO, so it
+  can't conflict with `total_tolerance` (tax-inclusive totals) or `line_reconciliation`
+  (ex-tax line prices) — those keep owning the amount math. Default severity FLAG
+  (`policy.py`), data-driven/overridable; wired through validator → engine → reason
+  (new review queue `missing_tax`) and the UI labels.
+- A reserved **ex-tax `PO-5011`** + a `demo_flag_notax.pdf` generator case
+  (`scripts/make_live_demo_invoices.py`) so the missing-tax flag demos cleanly (it's the
+  *only* failing check). New tax tests in `test_validation` + `test_decision`.
+
+### Notes
+- **Skip-on-unknown** is deliberate: the answer key carries no tax (`treatment=null`), so
+  `validate_all --dry-run`, CI's smoke, and `seed_demo_history` stay at **6 APPROVE /
+  3 FLAG / 2 REJECT** with no answer-key changes. Live extraction always classifies tax,
+  so a genuine no-tax invoice still flags.
+- Docs bumped "six/6 checks" → "seven/7" across README, CLAUDE, ARCHITECTURE, API, DEMO.
+
 ## [v4.3] — CI/CD + staging/production gitflow
 
 Test-gated continuous delivery on top of the Render deploy. No application code
@@ -21,9 +44,11 @@ changes — pipelines + branch strategy + docs.
   into `staging` / `production` (or manual dispatch): re-runs CI, then POSTs the
   matching Render **deploy hook(s)**. Skips gracefully (a warning, never a failure)
   when a hook secret is absent, so it's inert until configured.
-- **`feature → main → staging → production`** branch strategy, documented in
+- **`feature → develop → staging → production`** branch strategy, documented in
   [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md) (secrets, per-env Render services, disabling
-  Render auto-deploy so CI gates, and branch protection).
+  Render auto-deploy so CI gates, and branch protection). `render.yaml` provisions
+  **both** environments (staging + production service sets, branch-pinned,
+  `autoDeploy: false`) in one Blueprint.
 
 ### Fixed
 - Deploy docs now seed demo history **from a laptop via the database's External URL**

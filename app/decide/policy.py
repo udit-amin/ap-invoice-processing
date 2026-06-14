@@ -26,6 +26,7 @@ DEFAULT_SEVERITY = {
     "duplicate":           REJECT,
     "total_tolerance":     FLAG,
     "line_reconciliation": FLAG,
+    "tax_present":         FLAG,
     "low_confidence":      FLAG,
     "incomplete":          FLAG,
     "over_authority":      FLAG,

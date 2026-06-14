@@ -1,39 +1,50 @@
-# Render Blueprint — the whole stack from one repo.
+# Render Blueprint — two environments (staging + production) from one repo.
 #
-#   browser → ap-ui (Streamlit, public) → ap-api (FastAPI, public) → ap-invoices-db
+#   browser → ap-ui-<env> (Streamlit) → ap-api-<env> (FastAPI) → ap-invoices-db-<env>
 #
-# UI → API is server-to-server (ui/api_client.py uses requests), so there is no
-# browser CORS to configure; the grader only needs the ap-ui URL. The API
-# self-applies the schema and seeds reference data + demo users on first boot
-# (app/main.py lifespan), so a fresh empty database just works.
+# Each environment's services are pinned to their branch (`branch:`) and have
+# `autoDeploy: false`, so a raw git push does NOT deploy. Instead GitHub Actions
+# (.github/workflows/deploy.yml) runs CI on a push to staging/production and, only
+# if it's green, POSTs that environment's Render **deploy hook** — so tests gate
+# every release. UI → API is server-to-server (no CORS); the grader only needs the
+# `ap-ui-<env>` URL of the environment you're showing.
 #
-# Deploy: Render → New → Blueprint → pick this repo. Then:
-#   1. Set ANTHROPIC_API_KEY on ap-api (it's sync:false, so never in git).
-#   2. After the first deploy, copy ap-api's URL into ap-ui's API_BASE_URL and
-#      redeploy ap-ui (Render exposes only the bare host via fromService, and
-#      api_client needs the full https:// URL).
-#   3. Open ap-api → Shell → `python scripts/seed_demo_history.py` to back-date
-#      ~5 days of history so the dashboard isn't empty (no API key needed).
+# Apply once: Render → New → Blueprint → pick this repo (reads render.yaml from the
+# default branch, `develop`). Then, per service, see docs/DEPLOYMENT.md:
+#   - set ANTHROPIC_API_KEY on each *-api service (secret),
+#   - set API_BASE_URL on each *-ui service to its sibling api URL,
+#   - copy each service's Deploy Hook into the matching GitHub secret
+#     RENDER_DEPLOY_HOOK_{STAGING,PRODUCTION}_{API,UI}.
+#
+# Free-tier note: if your account allows only one free PostgreSQL, drop one of the
+# two databases below and point both environments' DATABASE_URL at the survivor
+# (acceptable for a demo; separate DBs is the cleaner default).
 
 databases:
-  - name: ap-invoices-db
+  - name: ap-invoices-db-staging
+    databaseName: ap_invoices
+    user: ap
+    plan: free
+  - name: ap-invoices-db-prod
     databaseName: ap_invoices
     user: ap
     plan: free
 
 services:
-  # --- API ---------------------------------------------------------------
+  # ======================= STAGING (branch: staging) =======================
   - type: web
-    name: ap-api
+    name: ap-api-staging
     runtime: docker
     plan: free
+    branch: staging
+    autoDeploy: false
     dockerfilePath: ./Dockerfile
     dockerCommand: uvicorn app.main:app --host 0.0.0.0 --port $PORT
     healthCheckPath: /health
     envVars:
       - key: DATABASE_URL
         fromDatabase:
-          name: ap-invoices-db
+          name: ap-invoices-db-staging
           property: connectionString
       - key: JWT_SECRET
         generateValue: true
@@ -41,20 +52,57 @@ services:
         value: production
       - key: PYTHONUNBUFFERED
         value: "1"
-      # Secret — set in the Render dashboard, never committed.
       - key: ANTHROPIC_API_KEY
         sync: false
 
-  # --- UI ----------------------------------------------------------------
   - type: web
-    name: ap-ui
+    name: ap-ui-staging
     runtime: docker
     plan: free
+    branch: staging
+    autoDeploy: false
     dockerfilePath: ./Dockerfile
     dockerCommand: streamlit run ui/app.py --server.port $PORT --server.address 0.0.0.0 --server.headless true --browser.gatherUsageStats false
     healthCheckPath: /_stcore/health
     envVars:
-      # Set to ap-api's public URL after the first deploy, e.g.
-      # https://ap-api.onrender.com  (full scheme + host; api_client uses it verbatim).
+      # Set to ap-api-staging's public URL after the first deploy.
+      - key: API_BASE_URL
+        sync: false
+
+  # ===================== PRODUCTION (branch: production) ====================
+  - type: web
+    name: ap-api-prod
+    runtime: docker
+    plan: free
+    branch: production
+    autoDeploy: false
+    dockerfilePath: ./Dockerfile
+    dockerCommand: uvicorn app.main:app --host 0.0.0.0 --port $PORT
+    healthCheckPath: /health
+    envVars:
+      - key: DATABASE_URL
+        fromDatabase:
+          name: ap-invoices-db-prod
+          property: connectionString
+      - key: JWT_SECRET
+        generateValue: true
+      - key: ENVIRONMENT
+        value: production
+      - key: PYTHONUNBUFFERED
+        value: "1"
+      - key: ANTHROPIC_API_KEY
+        sync: false
+
+  - type: web
+    name: ap-ui-prod
+    runtime: docker
+    plan: free
+    branch: production
+    autoDeploy: false
+    dockerfilePath: ./Dockerfile
+    dockerCommand: streamlit run ui/app.py --server.port $PORT --server.address 0.0.0.0 --server.headless true --browser.gatherUsageStats false
+    healthCheckPath: /_stcore/health
+    envVars:
+      # Set to ap-api-prod's public URL after the first deploy.
       - key: API_BASE_URL
         sync: false

@@ -1,14 +1,14 @@
 name: CI
 
-# Runs on every PR (any base) and on pushes to main. Also exposed as a reusable
-# workflow (workflow_call) so the Deploy pipeline can gate a release on the exact
-# same checks. Deploys to staging/production are handled by deploy.yml, which
-# calls this — so we deliberately do NOT trigger on push to those branches here
-# (avoids running the suite twice).
+# Runs on every PR (any base) and on pushes to develop (the integration branch).
+# Also exposed as a reusable workflow (workflow_call) so the Deploy pipeline can
+# gate a release on the exact same checks. Deploys to staging/production are
+# handled by deploy.yml, which calls this — so we deliberately do NOT trigger on
+# push to those branches here (avoids running the suite twice).
 on:
   pull_request:
   push:
-    branches: [main]
+    branches: [develop]
   workflow_call:
 
 jobs:

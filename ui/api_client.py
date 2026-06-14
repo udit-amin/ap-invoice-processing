@@ -193,13 +193,14 @@ STAGE_SEQUENCE = [
     ("logged",    "Logged"),
 ]
 
-# Human labels for the six checks ("What the system saw" panel).
+# Human labels for the seven checks ("What the system saw" panel).
 CHECK_LABELS = {
     "po_lookup":           "PO match",
     "vendor_approved":     "Vendor approval",
     "po_status":           "PO status",
     "total_tolerance":     "Amount tolerance",
     "line_reconciliation": "Line items",
+    "tax_present":         "Tax present",
     "duplicate":           "Duplicate check",
 }
 
@@ -210,6 +211,7 @@ DRIVER_LABELS = {
     "po_status":           ("PO open for billing",        "PO not open for billing"),
     "total_tolerance":     ("Amount within tolerance",    "Amount outside PO tolerance"),
     "line_reconciliation": ("Line items match the PO",    "Line items don't reconcile"),
+    "tax_present":         ("Tax included on invoice",    "No tax on the invoice"),
     "duplicate":           ("Not a duplicate",            "Already processed (duplicate)"),
     "low_confidence":      ("Extraction confident",       "Low extraction confidence"),
     "incomplete":          ("All required fields present", "Required fields missing"),
@@ -222,6 +224,7 @@ QUEUE_LABELS = {
     "line_variance":  "Line variance — confirm the substitution",
     "tolerance":      "Amount over tolerance — confirm the overage",
     "over_authority": "Over authority ceiling — exercise spending authority",
+    "missing_tax":    "No tax on the invoice — confirm tax-exempt or request a corrected invoice",
     "low_confidence": "Low confidence — verify the read against the source",
     "incomplete":     "Incomplete — complete the missing fields",
 }

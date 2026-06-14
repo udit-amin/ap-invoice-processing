@@ -288,7 +288,7 @@ three flag-type review views. **404** if the run has no verdict.
 Returns the verdict (`verdict`, `reason`, `drivers`, `review_payload`,
 `confidence_overall`, `policy_version`, `invoice_total`,
 `auto_approve_ceiling_applied`), the persisted `extraction` (fields + per-field
-confidence), the six `checks`, the per-line `line_reconciliation` side-by-side,
+confidence), the seven `checks`, the per-line `line_reconciliation` side-by-side,
 and `has_file`.
 
 ```bash

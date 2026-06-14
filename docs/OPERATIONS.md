@@ -48,26 +48,22 @@ python -m app.users.seed    # the demo users (replace with real users in prod)
 ```
 
 **Render (the live demo deployment)** — the same image, driven by `render.yaml`
-(Blueprint) at the repo root: a managed Postgres + two web services, `ap-api`
-(`uvicorn`) and `ap-ui` (`streamlit`). UI → API is server-side, so there's no
-CORS. Steps:
+(Blueprint) at the repo root. One apply provisions **two environments**: staging
+(`ap-api-staging` + `ap-ui-staging` + `ap-invoices-db-staging`, branch `staging`)
+and production (`ap-api-prod` + `ap-ui-prod` + `ap-invoices-db-prod`, branch
+`production`). UI → API is server-side, so there's no CORS. Each service is
+`autoDeploy: false`; a merge into `staging`/`production` runs CI and, on green,
+the GitHub deploy hook deploys that environment (see [DEPLOYMENT.md](DEPLOYMENT.md)
+for the full step-by-step — Blueprint, env vars, `API_BASE_URL`, deploy-hook
+secrets, branch protection). The API self-applies the schema + seeds reference
+data + the 4 users on first boot; seed back-dated history per env from your laptop
+against each db's **External URL** (free tier has no Shell):
+`DATABASE_URL='<external-url>?sslmode=require' .venv/bin/python scripts/seed_demo_history.py`.
+The same external URL drives every reset/edit later (§6) without a shell.
 
-1. Render → **New → Blueprint** → pick the repo (creates DB + both services).
-2. Set `ANTHROPIC_API_KEY` on `ap-api` (secret). After the first deploy, set
-   `ap-ui`'s `API_BASE_URL` to `ap-api`'s public URL (e.g.
-   `https://ap-api.onrender.com`) — Render's `fromService` gives only the bare
-   host, and `api_client` needs the full `https://` URL — then redeploy `ap-ui`.
-3. First API boot self-applies the schema + seeds reference data + the 4 users.
-4. Seed ~5 days of back-dated history so the dashboard isn't empty. Free-tier
-   services have **no Shell/SSH**, so run it from your laptop against the
-   database's **External URL** (Render → `ap-invoices-db` → Connect):
-   `DATABASE_URL='<external-url>?sslmode=require' .venv/bin/python scripts/seed_demo_history.py`
-   (no API key needed). The same external URL drives every reset/edit later (§6)
-   without a shell.
-
-The grader opens the **`ap-ui`** URL. Free-tier services sleep after ~15 min idle
-(~30–60 s cold start) — warm both URLs before a demo, or use the Starter tier for
-the grading window. The video script + live runbook are in [DEMO.md](DEMO.md).
+The grader opens the **`ap-ui-prod`** URL. Free-tier services sleep after ~15 min
+idle (~30–60 s cold start) — warm the URLs before a demo, or use the Starter tier
+for the grading window. The video script + live runbook are in [DEMO.md](DEMO.md).
 
 **Local / demo**
 
