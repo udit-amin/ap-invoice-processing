@@ -1,4 +1,4 @@
-"""Orchestrate the six validation checks and produce a structured evidence report.
+"""Orchestrate the seven validation checks and produce a structured evidence report.
 
 This module gathers evidence only.  It never sets an approve / reject / decision
 field — that belongs to the decision engine (next module).
@@ -23,6 +23,7 @@ _STAGE = {
     "po_status":            recorder.VALIDATE,
     "total_tolerance":      recorder.VALIDATE,
     "line_reconciliation":  recorder.VALIDATE,
+    "tax_present":          recorder.VALIDATE,
     "duplicate":            recorder.VALIDATE,
 }
 
@@ -36,7 +37,7 @@ def validate(
     vendor_registry: list[dict] | None = None,
     run_id: str | None = None,
 ) -> dict:
-    """Run all six checks and return a validation report.
+    """Run all seven checks and return a validation report.
 
     Reference data is loaded from Postgres when not injected — tests inject
     po_db / vendor_registry dicts to stay infra-free.  Duplicate detection and
@@ -81,7 +82,10 @@ def validate(
         _emit(checks.check_total_tolerance(inv_total, matched_po))
         _emit(checks.check_line_reconciliation(extracted, matched_po))
 
-    # --- Check 6: Duplicate detection (validate stage; always runs) ---
+    # --- Check 6: Tax presence (invoice-intrinsic; always runs) ---
+    _emit(checks.check_tax_present(extracted))
+
+    # --- Check 7: Duplicate detection (validate stage; always runs) ---
     _emit(checks.check_duplicate(inv_number, inv_vendor, run_id))
 
     ts_end = _ts()

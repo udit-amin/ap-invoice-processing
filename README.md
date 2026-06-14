@@ -12,7 +12,7 @@ The pipeline has four stages:
 
 ```
             ┌─ extract ─┐  ┌─ match ─┐  ┌─ validate ─┐  ┌─ decide ──┐
- PDF ─ingest┤ Claude →  │→ │ PO +    │→ │ 6 checks → │→ │ policy →   │→ verdict
+ PDF ─ingest┤ Claude →  │→ │ PO +    │→ │ 7 checks → │→ │ policy →   │→ verdict
             │ JSON      │  │ vendor  │  │ evidence   │  │ APPROVE/   │  + reason
             └───────────┘  └─────────┘  │(no verdict)│  │ FLAG/REJECT│
                                         └────────────┘  └───────────┘
@@ -69,7 +69,7 @@ app/
   validate/
     loader.py             Load POs + vendors from Postgres
     matcher.py            Fuzzy vendor / line-item matching (rapidfuzz)
-    checks.py             The six validation checks
+    checks.py             The seven validation checks
     validator.py          Runs checks → evidence report (no verdict)
   decide/
     policy.py             Load policy_config + data-driven severity map
@@ -321,7 +321,7 @@ Setup (secrets, Render environments, branch protection) is in
 
 ## The validation checks
 
-The validator runs six checks; each returns `pass | fail | skip` with a
+The validator runs seven checks; each returns `pass | fail | skip` with a
 human-readable reason. `skip` is a first-class outcome (the check could not run
 meaningfully by design) — it is never collapsed into pass or fail.
 
@@ -332,7 +332,13 @@ meaningfully by design) — it is never collapsed into pass or fail.
 | `po_status` | Is the matched PO `open`? |
 | `total_tolerance` | Is the invoice total within the PO's own `tolerance_pct`? |
 | `line_reconciliation` | Do line qty/price reconcile? (bundled / embedded-tax fallbacks) |
+| `tax_present` | Does the invoice declare tax (separated or embedded)? `none` → FLAG; unknown → skip |
 | `duplicate` | First time we've seen this invoice? (race-proof via a DB unique constraint) |
+
+`tax_present` is a **pure presence check** on the extractor's tax classification —
+it does no amount math and never touches the PO, so it can't conflict with
+`total_tolerance` / `line_reconciliation` (which already handle the tax-inclusive
+total vs ex-tax line prices).
 
 `line_reconciliation` classifies each line as `exact_match` / `price_variance` /
 `qty_variance` / `qty_and_price_variance` / `unmatched_invoice_line` /

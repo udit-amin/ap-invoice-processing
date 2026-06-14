@@ -1,4 +1,4 @@
-"""The six validation checks.  Each returns a check-result dict:
+"""The seven validation checks.  Each returns a check-result dict:
 
     {"check": str, "status": "pass"|"fail"|"skip", "reason": str}
 
@@ -271,4 +271,39 @@ def check_duplicate(
     return {
         "check": "duplicate", "status": "fail",
         "reason": f"Duplicate of an earlier run of invoice {invoice_number}",
+    }
+
+
+# ---------------------------------------------------------------------------
+# 7. Tax presence
+# ---------------------------------------------------------------------------
+
+def check_tax_present(extracted: dict) -> dict:
+    """A pure *presence* check: does the invoice declare tax?
+
+    This deliberately does NO amount arithmetic and never touches the PO or line
+    items — `total_tolerance` (tax-inclusive totals) and `line_reconciliation`
+    (ex-tax line prices, deriving ex-tax for embedded invoices) already own that
+    math. Re-deriving "lines + tax = total" here would double-count the tax gap.
+
+    So this only reads the extractor's tax classification:
+      - "separated" / "embedded" -> tax is present  -> pass
+      - "none"                    -> tax is absent   -> fail (a FLAG signal)
+      - null / unknown            -> not determined  -> skip (no escalation;
+        e.g. the answer-key dry-run path, which doesn't model tax)
+    """
+    treatment = (extracted.get("tax") or {}).get("treatment")
+    if treatment in ("separated", "embedded"):
+        return {
+            "check": "tax_present", "status": "pass",
+            "reason": f"Invoice includes {treatment} tax",
+        }
+    if treatment == "none":
+        return {
+            "check": "tax_present", "status": "fail",
+            "reason": "Invoice shows no tax — tax must be included",
+        }
+    return {
+        "check": "tax_present", "status": "skip",
+        "reason": "Tax presence could not be determined from the extraction",
     }

@@ -19,7 +19,7 @@ The pipeline is a fixed sequence, and **the stage boundary is the design**:
 
 ```
 PDF ─ingest→ extract ──→ match ────→ validate ──→ decide ───→ verdict
-            (Claude)   (PO+vendor)  (6 checks)   (policy)    (+ trail)
+            (Claude)   (PO+vendor)  (7 checks)   (policy)    (+ trail)
             extraction  evidence ▸ gather facts   apply policy ▸ one verdict
 ```
 
@@ -35,7 +35,7 @@ auditable — only *extraction* calls the model.
 | **API** | `app/` (FastAPI) | Auth, pipeline entry, runs/review/dashboard/policy/audit endpoints |
 | **Pipeline** | `app/pipeline/orchestrator.py` | The single entry (`process_invoice`) — ingest → extract → match → validate → decide |
 | **Extraction** | `app/extract/` | PDF → JSON via Claude; text (pdfplumber) vs vision (PyMuPDF→image) path auto-detected |
-| **Validation** | `app/validate/` | The six checks → an evidence report (never a verdict) |
+| **Validation** | `app/validate/` | The seven checks → an evidence report (never a verdict) |
 | **Decision** | `app/decide/` | Pure resolver (evidence + confidence + policy → verdict) + race-safe PO draw-down + persistence |
 | **Governance** | `app/governance/recorder.py` | Append-only trail (runs, events, reports, verdicts) + actor identity |
 | **Ingest worker** | `app/ingest/worker.py` | Sweep a landing area → pipeline → archive partitioned by `YYYYMMDD` |
@@ -138,7 +138,7 @@ sequenceDiagram
     C->>A: POST /invoices/process (PDF + bearer)
     A->>M: extract (text or vision)
     M-->>A: structured JSON + confidence
-    A->>A: match → validate (6 checks) → decide (pure)
+    A->>A: match → validate (7 checks) → decide (pure)
     A->>DB: write run, events, report, verdict; draw PO down on APPROVE
     A-->>C: {extraction, validation, decision, events}
     Note over C: UI replays the real events as a live stage tracker

@@ -12,7 +12,7 @@ from app.decide.policy import APPROVE, FLAG, REJECT, SEVERITY_RANK, Policy
 _REQUIRED_FIELDS = ["invoice_number", "vendor_name", "po_reference", "total"]
 _CHECK_SIGNALS = {
     "po_lookup", "vendor_approved", "po_status",
-    "total_tolerance", "line_reconciliation", "duplicate",
+    "total_tolerance", "line_reconciliation", "tax_present", "duplicate",
 }
 
 
@@ -23,7 +23,7 @@ def _driver(signal, outcome, severity, detail=None) -> dict:
 def _build_drivers(report: dict, extraction: dict, policy: Policy) -> list[dict]:
     drivers: list[dict] = []
 
-    # The six validation checks (evidence). Pass/skip contribute APPROVE (no
+    # The seven validation checks (evidence). Pass/skip contribute APPROVE (no
     # escalation); fail contributes the policy severity for that signal.
     for check in report.get("checks", []):
         name, status = check.get("check"), check.get("status")

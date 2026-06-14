@@ -131,7 +131,8 @@ def test_validate_full_report_passes_for_dell():
     report = validate(_dell_normal())
     by_name = {c["check"]: c for c in report["checks"]}
     assert set(by_name) == {"po_lookup", "vendor_approved", "po_status",
-                            "total_tolerance", "line_reconciliation", "duplicate"}
+                            "total_tolerance", "line_reconciliation", "tax_present",
+                            "duplicate"}
     assert all(c["status"] == "pass" for c in report["checks"])
     assert report["matched_po"] == "PO-5001"
 
