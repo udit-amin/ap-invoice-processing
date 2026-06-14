@@ -58,8 +58,12 @@ CORS. Steps:
    `https://ap-api.onrender.com`) — Render's `fromService` gives only the bare
    host, and `api_client` needs the full `https://` URL — then redeploy `ap-ui`.
 3. First API boot self-applies the schema + seeds reference data + the 4 users.
-4. `ap-api` → **Shell** → `python scripts/seed_demo_history.py` (no key needed)
-   for ~5 days of back-dated history so the dashboard isn't empty.
+4. Seed ~5 days of back-dated history so the dashboard isn't empty. Free-tier
+   services have **no Shell/SSH**, so run it from your laptop against the
+   database's **External URL** (Render → `ap-invoices-db` → Connect):
+   `DATABASE_URL='<external-url>?sslmode=require' .venv/bin/python scripts/seed_demo_history.py`
+   (no API key needed). The same external URL drives every reset/edit later (§6)
+   without a shell.
 
 The grader opens the **`ap-ui`** URL. Free-tier services sleep after ~15 min idle
 (~30–60 s cold start) — warm both URLs before a demo, or use the Starter tier for

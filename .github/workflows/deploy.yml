@@ -1,0 +1,53 @@
+name: Deploy
+
+# Continuous deployment. A merge into staging or production pushes that branch,
+# which triggers this pipeline: run the full CI suite first, then — only if it
+# passes — tell Render to deploy that environment. workflow_dispatch lets you
+# re-deploy a branch manually from the Actions tab.
+on:
+  push:
+    branches: [staging, production]
+  workflow_dispatch:
+
+jobs:
+  # Gate the deploy on the exact same checks as a PR (reusable CI workflow).
+  test:
+    uses: ./.github/workflows/ci.yml
+
+  deploy:
+    needs: test
+    runs-on: ubuntu-latest
+    # GitHub Environments give per-env protection rules + a deployment history.
+    environment: ${{ github.ref_name }}
+    steps:
+      - name: Trigger Render deploy for ${{ github.ref_name }}
+        env:
+          STAGING_API: ${{ secrets.RENDER_DEPLOY_HOOK_STAGING_API }}
+          STAGING_UI:  ${{ secrets.RENDER_DEPLOY_HOOK_STAGING_UI }}
+          PROD_API:    ${{ secrets.RENDER_DEPLOY_HOOK_PRODUCTION_API }}
+          PROD_UI:     ${{ secrets.RENDER_DEPLOY_HOOK_PRODUCTION_UI }}
+        run: |
+          set -euo pipefail
+          if [ "${GITHUB_REF_NAME}" = "production" ]; then
+            API_HOOK="${PROD_API:-}"; UI_HOOK="${PROD_UI:-}"
+          else
+            API_HOOK="${STAGING_API:-}"; UI_HOOK="${STAGING_UI:-}"
+          fi
+
+          deployed=0
+          for pair in "ap-api:${API_HOOK}" "ap-ui:${UI_HOOK}"; do
+            name="${pair%%:*}"; hook="${pair#*:}"
+            if [ -n "${hook}" ]; then
+              echo "→ Triggering Render deploy for ${name} (${GITHUB_REF_NAME})…"
+              curl -fsS -X POST "${hook}" >/dev/null
+              echo "  ✓ requested"
+              deployed=$((deployed + 1))
+            else
+              echo "· No deploy hook configured for ${name} (${GITHUB_REF_NAME}) — skipping."
+            fi
+          done
+
+          if [ "${deployed}" -eq 0 ]; then
+            echo "::warning::No Render deploy hooks set for '${GITHUB_REF_NAME}'. Add the"
+            echo "::warning::RENDER_DEPLOY_HOOK_* secrets (see docs/DEPLOYMENT.md) to enable CD."
+          fi

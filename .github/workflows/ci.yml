@@ -1,0 +1,75 @@
+name: CI
+
+# Runs on every PR (any base) and on pushes to main. Also exposed as a reusable
+# workflow (workflow_call) so the Deploy pipeline can gate a release on the exact
+# same checks. Deploys to staging/production are handled by deploy.yml, which
+# calls this — so we deliberately do NOT trigger on push to those branches here
+# (avoids running the suite twice).
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_call:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+
+    # A throwaway Postgres so the DB-backed tests actually run (they self-skip
+    # when Postgres is unreachable). DSN/creds match docker-compose + the config
+    # default, so no app changes are needed.
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: ap
+          POSTGRES_PASSWORD: ap
+          POSTGRES_DB: ap_invoices
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U ap -d ap_invoices"
+          --health-interval 5s --health-timeout 3s --health-retries 10
+
+    env:
+      DATABASE_URL: postgresql://ap:ap@localhost:5432/ap_invoices
+      JWT_SECRET: ci-test-secret
+      ENVIRONMENT: development
+      # No ANTHROPIC_API_KEY on purpose: the live-model tests (requires_api)
+      # skip cleanly, keeping CI free and deterministic.
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"   # matches the deploy image (Dockerfile)
+          cache: pip
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Apply schema + seed reference data + demo users
+        run: |
+          python -m app.db.seed
+          python -m app.users.seed
+
+      - name: Run test suite
+        run: python -m pytest -q
+
+      - name: Verdict-matrix smoke (expect 6 APPROVE / 3 FLAG / 2 REJECT)
+        run: python validate_all.py --dry-run
+
+  docker-build:
+    # Proves the single image the deploy uses still builds — catches a broken
+    # Dockerfile or an unbuildable dependency before it reaches Render.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - name: Build deploy image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: false
+          tags: ap-invoice:ci
