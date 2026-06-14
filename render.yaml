@@ -1,13 +1,13 @@
 # Render Blueprint — two environments (staging + production) from one repo.
 #
-#   browser → ap-ui(-staging) (Streamlit) → ap-api(-staging) (FastAPI) → ap-invoices-db(-*)
+#   browser → ap-ui-<env> (Streamlit) → ap-api-<env> (FastAPI) → ap-invoices-db-<env>
 #
 # Each environment's services are pinned to their branch (`branch:`) and have
 # `autoDeploy: false`, so a raw git push does NOT deploy. Instead GitHub Actions
 # (.github/workflows/deploy.yml) runs CI on a push to staging/production and, only
 # if it's green, POSTs that environment's Render **deploy hook** — so tests gate
 # every release. UI → API is server-to-server (no CORS); the grader only needs the
-# `ap-ui` URL of the environment you're showing.
+# `ap-ui-<env>` URL of the environment you're showing.
 #
 # Apply once: Render → New → Blueprint → pick this repo (reads render.yaml from the
 # default branch, `develop`). Then, per service, see docs/DEPLOYMENT.md:
@@ -71,7 +71,7 @@ services:
 
   # ===================== PRODUCTION (branch: production) ====================
   - type: web
-    name: ap-api
+    name: ap-api-prod
     runtime: docker
     plan: free
     branch: production
@@ -94,7 +94,7 @@ services:
         sync: false
 
   - type: web
-    name: ap-ui
+    name: ap-ui-prod
     runtime: docker
     plan: free
     branch: production
@@ -103,6 +103,6 @@ services:
     dockerCommand: streamlit run ui/app.py --server.port $PORT --server.address 0.0.0.0 --server.headless true --browser.gatherUsageStats false
     healthCheckPath: /_stcore/health
     envVars:
-      # Set to ap-api's public URL after the first deploy.
+      # Set to ap-api-prod's public URL after the first deploy.
       - key: API_BASE_URL
         sync: false
