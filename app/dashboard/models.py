@@ -103,7 +103,7 @@ def _window_metrics(cur, start, end, manual_cost: float, auto_cost: float) -> di
     # One pass over the window's verdicts powers counts, savings, duplicate
     # prevented, and the flags/rejections breakdowns.
     cur.execute(
-        """SELECT verdict, drivers, review_payload, invoice_total
+        """SELECT verdict, drivers, review_payload
            FROM verdicts
            WHERE tenant_id = %s AND decided_at >= %s AND decided_at < %s""",
         (config.TENANT_ID, start, end),
@@ -111,8 +111,7 @@ def _window_metrics(cur, start, end, manual_cost: float, auto_cost: float) -> di
     approve = flag = reject = 0
     flags_by_reason: dict[str, int] = {}
     rejections_by_reason: dict[str, int] = {}
-    dup_count, dup_value = 0, 0.0
-    for verdict, drivers, payload, inv_total in cur.fetchall():
+    for verdict, drivers, payload in cur.fetchall():
         if verdict == "APPROVE":
             approve += 1
         elif verdict == "FLAG":
@@ -128,9 +127,6 @@ def _window_metrics(cur, start, end, manual_cost: float, auto_cost: float) -> di
             for sig in reject_signals:
                 key = _REJECT_REASON.get(sig, sig)
                 rejections_by_reason[key] = rejections_by_reason.get(key, 0) + 1
-            if "duplicate" in reject_signals:
-                dup_count += 1
-                dup_value += float(inv_total) if inv_total is not None else 0.0
     total = approve + flag + reject
 
     # Cycle time (ms) over runs started in the window.
@@ -179,8 +175,6 @@ def _window_metrics(cur, start, end, manual_cost: float, auto_cost: float) -> di
         "avg_cycle_ms": float(avg_cycle_ms) if avg_cycle_ms is not None else None,
         "avg_time_in_queue_sec": float(avg_queue_sec) if avg_queue_sec is not None else None,
         "touchless_savings": approve * (manual_cost - auto_cost),
-        "duplicate_spend_count": dup_count,
-        "duplicate_spend_value": dup_value,
         "audit_completeness": (runs_complete / runs_total) if runs_total else None,
         "flags_by_reason": flags_by_reason,
         "rejections_by_reason": rejections_by_reason,
@@ -220,12 +214,6 @@ def kpis(days: int = 30) -> dict[str, Any]:
             "avg_cycle_ms": card("avg_cycle_ms"),
             "avg_time_in_queue_sec": card("avg_time_in_queue_sec"),
             "touchless_savings": card("touchless_savings"),
-            "duplicate_spend_prevented": {
-                "value": current["duplicate_spend_value"],
-                "count": current["duplicate_spend_count"],
-                "delta": _delta(current["duplicate_spend_value"],
-                                previous["duplicate_spend_value"]),
-            },
             "audit_completeness": card("audit_completeness"),
         },
         "flags_by_reason": current["flags_by_reason"],

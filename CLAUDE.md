@@ -29,7 +29,7 @@ PDF ─ingest→ extract ─→ match ─→ validate ─→ decide ─→ verdi
 - `app/pipeline/orchestrator.py` — `process_invoice(...)`; the single entry the
   API route **and** `validate_all.py` both call, so the trail is identical.
 - Routers: `app/pipeline` (`/extract`, `/invoices/process`), `app/invoices`
-  (runs), `app/review` (queue + actions + `/{run_id}` detail + `/{run_id}/file`),
+  (runs), `app/review` (queue + actions + `/{run_id}` detail + `/file` + `/preview`),
   `app/dashboard` (`/summary`, `/trends`, `/kpis`), `app/policy`, `app/audit`,
   `app/auth`. Wired in `app/main.py`.
 - `ui/` — Streamlit **thin client** (v4) over the API: `api_client.py` (one fn

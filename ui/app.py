@@ -12,7 +12,7 @@ import streamlit as st
 
 import api_client
 import session
-from views import dashboard, policy, review_queue, run_view
+from views import batch_ingest, dashboard, policy, review_queue, run_view
 
 st.set_page_config(page_title="AP Invoice Processing", page_icon="🧾", layout="wide")
 
@@ -58,6 +58,7 @@ def _sidebar() -> None:
 _PAGES = {
     "clerk": lambda: [
         st.Page(run_view.render, title="Run view", icon="📤", url_path="run", default=True),
+        st.Page(batch_ingest.render, title="Batch ingest", icon="📥", url_path="batch"),
         st.Page(review_queue.render, title="Review queue", icon="📋", url_path="review"),
     ],
     "manager": lambda: [

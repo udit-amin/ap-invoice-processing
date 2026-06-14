@@ -13,6 +13,13 @@ from components import decision_card, invoice_detail
 _SEL = "review_sel"
 
 
+@st.cache_data(ttl=300, show_spinner=False)
+def _preview(run_id: str) -> bytes | None:
+    """The rendered source-page image is immutable per run — safe to cache (the
+    queue itself is never cached)."""
+    return api_client.get_review_preview(run_id)
+
+
 def render() -> None:
     st.title("📋 Review queue")
     try:
@@ -77,10 +84,12 @@ def _detail(run_id: str) -> None:
         with b:
             st.markdown("**Original scan**")
             try:
+                preview = _preview(run_id)
                 pdf = api_client.get_review_file(run_id)
             except api_client.ApiError:
-                pdf = None
-            invoice_detail.render_scan(pdf, filename=f"{d.get('invoice_number', 'invoice')}.pdf")
+                preview = pdf = None
+            invoice_detail.render_scan(preview, pdf,
+                                       filename=f"{d.get('invoice_number', 'invoice')}.pdf")
 
     with st.expander("Full decision detail"):
         decision_card.render(d)

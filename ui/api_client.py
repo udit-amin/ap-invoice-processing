@@ -59,6 +59,15 @@ def _detail(resp: requests.Response) -> str:
     return resp.text or f"HTTP {resp.status_code}"
 
 
+def _send(method: str, url: str, **kwargs) -> requests.Response:
+    """Issue a request, turning transport failures (API down, DNS, timeout) into
+    a friendly ApiError instead of a raw traceback in the UI."""
+    try:
+        return requests.request(method, url, **kwargs)
+    except requests.RequestException as exc:
+        raise ApiError(503, f"Can't reach the API at {API_BASE_URL} — is it running?") from exc
+
+
 def _json(resp: requests.Response) -> Any:
     if resp.status_code >= 400:
         raise ApiError(resp.status_code, _detail(resp))
@@ -70,7 +79,7 @@ def _json(resp: requests.Response) -> Any:
 # --------------------------------------------------------------------------- #
 def login(email: str, password: str) -> dict[str, Any]:
     """POST /auth/login → {access_token, token_type, expires_in, user{name,role}}."""
-    r = requests.post(f"{API_BASE_URL}/auth/login",
+    r = _send("post",f"{API_BASE_URL}/auth/login",
                       json={"email": email, "password": password}, timeout=_TIMEOUT)
     return _json(r)
 
@@ -79,7 +88,7 @@ def process_invoice(filename: str, data: bytes,
                     content_type: str = "application/pdf") -> dict[str, Any]:
     """POST /invoices/process → {run_id, extraction, validation, decision, events}."""
     files = {"file": (filename, data, content_type)}
-    r = requests.post(f"{API_BASE_URL}/invoices/process",
+    r = _send("post",f"{API_BASE_URL}/invoices/process",
                       headers=_headers(), files=files, timeout=_PROCESS_TIMEOUT)
     return _json(r)
 
@@ -88,30 +97,30 @@ def get_runs(verdict: str | None = None, limit: int = 100, offset: int = 0) -> d
     params: dict[str, Any] = {"limit": limit, "offset": offset}
     if verdict:
         params["verdict"] = verdict
-    r = requests.get(f"{API_BASE_URL}/invoices/runs",
+    r = _send("get",f"{API_BASE_URL}/invoices/runs",
                      headers=_headers(), params=params, timeout=_TIMEOUT)
     return _json(r)
 
 
 def get_run(run_id: str) -> dict[str, Any]:
-    r = requests.get(f"{API_BASE_URL}/invoices/runs/{run_id}",
+    r = _send("get",f"{API_BASE_URL}/invoices/runs/{run_id}",
                      headers=_headers(), timeout=_TIMEOUT)
     return _json(r)
 
 
 def get_review_queue() -> dict[str, Any]:
-    r = requests.get(f"{API_BASE_URL}/review/queue", headers=_headers(), timeout=_TIMEOUT)
+    r = _send("get",f"{API_BASE_URL}/review/queue", headers=_headers(), timeout=_TIMEOUT)
     return _json(r)
 
 
 def get_review_detail(run_id: str) -> dict[str, Any]:
-    r = requests.get(f"{API_BASE_URL}/review/{run_id}", headers=_headers(), timeout=_TIMEOUT)
+    r = _send("get",f"{API_BASE_URL}/review/{run_id}", headers=_headers(), timeout=_TIMEOUT)
     return _json(r)
 
 
 def get_review_file(run_id: str) -> bytes | None:
     """GET /review/{run_id}/file → raw PDF bytes, or None if none stored (404)."""
-    r = requests.get(f"{API_BASE_URL}/review/{run_id}/file",
+    r = _send("get",f"{API_BASE_URL}/review/{run_id}/file",
                      headers=_headers(), timeout=_TIMEOUT)
     if r.status_code == 404:
         return None
@@ -120,38 +129,49 @@ def get_review_file(run_id: str) -> bytes | None:
     return r.content
 
 
+def get_review_preview(run_id: str, page: int = 0) -> bytes | None:
+    """GET /review/{run_id}/preview → a rendered PNG of one source page, or None."""
+    r = _send("get",f"{API_BASE_URL}/review/{run_id}/preview",
+                     headers=_headers(), params={"page": page}, timeout=_TIMEOUT)
+    if r.status_code == 404:
+        return None
+    if r.status_code >= 400:
+        raise ApiError(r.status_code, _detail(r))
+    return r.content
+
+
 def post_review_action(run_id: str, action: str, note: str | None) -> dict[str, Any]:
-    r = requests.post(f"{API_BASE_URL}/review/{run_id}/action",
+    r = _send("post",f"{API_BASE_URL}/review/{run_id}/action",
                       headers=_headers(), json={"action": action, "note": note},
                       timeout=_TIMEOUT)
     return _json(r)
 
 
 def get_kpis(days: int = 30) -> dict[str, Any]:
-    r = requests.get(f"{API_BASE_URL}/dashboard/kpis",
+    r = _send("get",f"{API_BASE_URL}/dashboard/kpis",
                      headers=_headers(), params={"days": days}, timeout=_TIMEOUT)
     return _json(r)
 
 
 def get_trends(days: int = 30) -> dict[str, Any]:
-    r = requests.get(f"{API_BASE_URL}/dashboard/trends",
+    r = _send("get",f"{API_BASE_URL}/dashboard/trends",
                      headers=_headers(), params={"days": days}, timeout=_TIMEOUT)
     return _json(r)
 
 
 def get_policy() -> dict[str, Any]:
-    r = requests.get(f"{API_BASE_URL}/policy", headers=_headers(), timeout=_TIMEOUT)
+    r = _send("get",f"{API_BASE_URL}/policy", headers=_headers(), timeout=_TIMEOUT)
     return _json(r)
 
 
 def put_policy(changes: dict[str, Any]) -> dict[str, Any]:
-    r = requests.put(f"{API_BASE_URL}/policy", headers=_headers(),
+    r = _send("put",f"{API_BASE_URL}/policy", headers=_headers(),
                      json=changes, timeout=_TIMEOUT)
     return _json(r)
 
 
 def get_audit(invoice_number: str) -> dict[str, Any]:
-    r = requests.get(f"{API_BASE_URL}/audit/{invoice_number}",
+    r = _send("get",f"{API_BASE_URL}/audit/{invoice_number}",
                      headers=_headers(), timeout=_TIMEOUT)
     return _json(r)
 

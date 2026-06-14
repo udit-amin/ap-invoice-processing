@@ -4,8 +4,6 @@ original scan. Pure rendering — all data comes from the API.
 """
 from __future__ import annotations
 
-import base64
-
 import pandas as pd
 import streamlit as st
 
@@ -72,16 +70,17 @@ def line_table(line_detail: list[dict] | None) -> None:
     st.dataframe(pd.DataFrame(rows), hide_index=True, use_container_width=True)
 
 
-def render_scan(pdf_bytes: bytes | None, filename: str = "invoice.pdf") -> None:
-    """Embed the original PDF inline, with a download fallback."""
-    if not pdf_bytes:
+def render_scan(preview_png: bytes | None, pdf_bytes: bytes | None,
+                filename: str = "invoice.pdf") -> None:
+    """Show a rendered image of the source page (reliable across browsers) with a
+    download for the full PDF."""
+    if preview_png:
+        st.image(preview_png, use_container_width=True)
+    elif not pdf_bytes:
         st.caption("No source document stored for this run.")
         return
-    b64 = base64.b64encode(pdf_bytes).decode()
-    st.markdown(
-        f'<embed src="data:application/pdf;base64,{b64}" '
-        f'width="100%" height="460" type="application/pdf"/>',
-        unsafe_allow_html=True,
-    )
-    st.download_button("⬇ Download original", data=pdf_bytes,
-                       file_name=filename, mime="application/pdf")
+    else:
+        st.caption("Preview unavailable — download to view the original.")
+    if pdf_bytes:
+        st.download_button("⬇ Download original", data=pdf_bytes,
+                           file_name=filename, mime="application/pdf")

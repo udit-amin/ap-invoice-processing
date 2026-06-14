@@ -13,20 +13,25 @@ additions it needs. No business logic in the UI — it calls endpoints and rende
 
 ### Added
 - **`ui/` Streamlit app** — login gate + role-driven `st.navigation` (clerks see
-  Run view + Review queue; managers see Review queue + Dashboard + Policy). One
-  `api_client` wraps every endpoint and owns the human-label translation layer;
-  `session` keeps the token across reruns. The run view replays the real
-  governance events as a live stage tracker; the review queue renders a distinct
-  view per flag type (line-variance side-by-side, over-ceiling amount, low-
-  confidence scan + flagged fields); the dashboard shows six KPI cards, flag/
-  rejection breakdowns, a trend chart, and a runs table with an audit drill-in.
+  Run view + Batch ingest + Review queue; managers see Review queue + Dashboard +
+  Policy). One `api_client` wraps every endpoint and owns the human-label
+  translation layer; `session` keeps the token across reruns. The run view
+  replays the real governance events as a live stage tracker; **Batch ingest**
+  runs every PDF in a server-side folder through the pipeline (progress + results
+  table); the review queue renders a distinct view per flag type (line-variance
+  side-by-side, over-ceiling amount, low-confidence scan + flagged fields, the
+  scan rendered server-side to an image); the dashboard shows five KPI cards (+ an
+  honest quality placeholder), flag/rejection breakdowns, a trend chart, and a
+  runs table with an audit drill-in.
 - **`GET /dashboard/kpis`** (manager) — STP rate, avg cycle time, avg time-in-
-  queue, touchless savings, duplicate spend prevented, audit completeness, and
-  flags/rejections-by-reason, each with a prior-period delta, in one payload.
-  Quality KPIs (false-approve / override) are deliberately omitted, not faked.
-- **`GET /review/{run_id}`** and **`GET /review/{run_id}/file`** — full review
-  context (drivers, review payload, extraction, per-line side-by-side) and the
-  stored original PDF, powering the three flag-type review views (either role).
+  queue, touchless savings, audit completeness, and flags/rejections-by-reason,
+  each with a prior-period delta, in one payload. Quality KPIs (false-approve /
+  override) are deliberately omitted, not faked; duplicate detection is a
+  *safeguard*, surfaced only in the rejections breakdown — not a savings KPI.
+- **`GET /review/{run_id}`**, **`/file`**, and **`/preview`** — full review
+  context (drivers, review payload, extraction, per-line side-by-side), the
+  stored original PDF, and a server-rendered PNG of a source page for an inline
+  preview. Either role (the queue is global).
 - `manual_cost_per_invoice` / `auto_cost_per_invoice` on `policy_config`
   (₹900 / ₹170) for touchless savings; `pipeline_runs.extraction` JSONB + an
   `invoice_files` (BYTEA) table persisting each upload, so the review UI can show

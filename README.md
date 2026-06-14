@@ -46,7 +46,7 @@ app/
     router.py             GET /invoices/runs, GET /invoices/runs/{run_id}
     models.py             Tenant-scoped run list/detail (clerk = own, manager = all)
   review/
-    router.py             GET /review/queue + /{run_id} + /{run_id}/file, POST /review/{run_id}/action
+    router.py             GET /review/queue + /{run_id} (+ /file, /preview), POST /review/{run_id}/action
     service.py            Effectful approve (PO draw-down) / reject / escalate; review-detail read
   dashboard/
     router.py             GET /dashboard/summary, /trends, /kpis (manager-only)
@@ -85,7 +85,7 @@ ui/                       Streamlit front end (v4) — thin client over the API
   app.py                  Login gate + role-driven st.navigation + sidebar
   api_client.py           One fn per endpoint + bearer + human-label translation
   session.py              Token + current user in st.session_state
-  views/                  run_view, review_queue, dashboard, policy (one render() each)
+  views/                  run_view, batch_ingest, review_queue, dashboard, policy (one render() each)
   components/             decision_card, stage_tracker, invoice_detail
 validate_all.py           CLI harness — runs all 11 invoices, prints the matrix + verdicts
 scripts/
@@ -171,6 +171,7 @@ uvicorn app.main:app --reload
 | `GET  /review/queue` | Flagged runs awaiting a human decision | clerk · manager |
 | `GET  /review/{run_id}` | Flagged-run review context (drivers, fields, line side-by-side) | clerk · manager |
 | `GET  /review/{run_id}/file` | The original uploaded PDF (for the low-confidence scan view) | clerk · manager |
+| `GET  /review/{run_id}/preview` | A rendered PNG of a source page (inline preview) | clerk · manager |
 | `POST /review/{run_id}/action` | `approve` (draws PO down) / `reject` / `escalate` | clerk · manager |
 | `GET  /dashboard/summary` | Verdict mix, review backlog, totals | manager |
 | `GET  /dashboard/trends` | Per-day verdict counts (`?days=`) | manager |
@@ -245,8 +246,9 @@ seeded user; the sidebar shows only the pages your role can use:
 | Page | clerk | manager | What it does |
 |------|:---:|:---:|------|
 | **Run view** | ✅ | — | Upload a PDF → the seven stages light up from the **real** governance events → decision card + "what the system saw" |
+| **Batch ingest** | ✅ | — | Process every PDF in a server-side folder through the pipeline → progress + a results table |
 | **Review queue** | ✅ | ✅ | Flagged items (oldest-first) with a distinct view per flag type: line-variance side-by-side, over-ceiling amount, low-confidence scan + flagged fields → approve / reject / escalate |
-| **Dashboard** | — | ✅ | Six KPI cards, flag/rejection breakdowns, a 30-day trend, and a filterable runs table with an audit drill-in |
+| **Dashboard** | — | ✅ | Five KPI cards (+ an honest quality-monitoring placeholder), flag/rejection breakdowns, a 30-day trend, and a filterable runs table with an audit drill-in |
 | **Policy** | — | ✅ | Edit the auto-approve ceiling / confidence gate live (a subsequent fresh run reflects it) |
 
 The run view's stage replay paces the **real** events the backend emitted (the

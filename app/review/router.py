@@ -5,6 +5,7 @@ from fastapi import APIRouter, Depends, HTTPException, Response
 from pydantic import BaseModel, Field
 
 from app.auth.dependencies import CurrentUser, get_current_user
+from app.extract.vision_extract import render_page_png
 from app.governance import recorder
 from app.review import service
 
@@ -72,3 +73,22 @@ def review_file(run_id: str, user: CurrentUser = Depends(get_current_user)):
         media_type=content_type or "application/pdf",
         headers={"Content-Disposition": f'inline; filename="{filename or run_id}"'},
     )
+
+
+@router.get("/review/{run_id}/preview")
+def review_preview(
+    run_id: str,
+    page: int = 0,
+    user: CurrentUser = Depends(get_current_user),
+):
+    """Render a page of the stored source PDF to PNG for an inline preview
+    (more reliable than embedding the PDF). 404 if no file or the page is out
+    of range / unrenderable.
+    """
+    found = recorder.fetch_invoice_file(run_id)
+    if found is None:
+        raise HTTPException(status_code=404, detail=f"No source file for run {run_id}")
+    png = render_page_png(found[2], page=page)
+    if png is None:
+        raise HTTPException(status_code=404, detail="No such page or unrenderable PDF")
+    return Response(content=png, media_type="image/png")

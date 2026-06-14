@@ -76,14 +76,13 @@ def _band_kpis(k: dict) -> None:
     r2 = st.columns(3)
     r2[0].metric("Touchless savings", fmt.rupees(kp["touchless_savings"]["value"]),
                  _delta_num(kp["touchless_savings"]["delta"], prefix="₹"))
-    dup = kp["duplicate_spend_prevented"]
-    r2[1].metric("Duplicate spend prevented", fmt.rupees(dup["value"]),
-                 f"{dup['count']} invoice(s)", delta_color="off")
-    r2[2].metric("Audit completeness", fmt.pct(kp["audit_completeness"]["value"]))
-
-    st.caption("ℹ️ **Quality monitoring** — false-approve and override rates will appear "
-               "here once audit feedback is connected. Not shown rather than fabricated: "
-               "they need a downstream ground-truth signal the demo doesn't have yet.")
+    r2[1].metric("Audit completeness", fmt.pct(kp["audit_completeness"]["value"]))
+    # Quality monitoring is shown honestly rather than faked — false-approve and
+    # override rates need a downstream ground-truth signal the demo doesn't have.
+    with r2[2]:
+        st.markdown("**Quality monitoring**")
+        st.caption("ℹ️ False-approve / override rates — coming once audit feedback "
+                   "is connected.")
 
 
 def _dur(seconds) -> str:

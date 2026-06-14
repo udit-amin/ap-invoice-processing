@@ -304,6 +304,17 @@ can show the source scan. **404** if no file was stored for the run.
 curl -s http://localhost:8000/review/$RUN_ID/file -H "Authorization: Bearer $MGR" -o invoice.pdf
 ```
 
+### `GET /review/{run_id}/preview` · clerk · manager
+
+Renders one page of the stored source PDF to PNG (`?page=`, default 0) for an
+inline preview that's more reliable than embedding the PDF. **404** if no file
+was stored or the page is out of range / unrenderable.
+
+```bash
+curl -s "http://localhost:8000/review/$RUN_ID/preview?page=0" \
+  -H "Authorization: Bearer $MGR" -o page1.png
+```
+
 ---
 
 ## Dashboard (manager — 403 for clerk)
@@ -361,7 +372,6 @@ shows an honest placeholder rather than a fabricated number.
     "avg_cycle_ms": { "value": 4.6, "delta": null },
     "avg_time_in_queue_sec": { "value": 420.0, "delta": null },
     "touchless_savings": { "value": 4380.0, "delta": 4380.0 },
-    "duplicate_spend_prevented": { "value": 0.0, "count": 0, "delta": 0.0 },
     "audit_completeness": { "value": 1.0, "delta": null }
   },
   "flags_by_reason": { "line_variance": 1, "over_authority": 1, "low_confidence": 1 },

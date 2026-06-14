@@ -254,3 +254,21 @@ def test_review_file_404_then_streams(client, reset_db):
     assert r.status_code == 200
     assert r.headers["content-type"] == "application/pdf"
     assert r.content == b"%PDF-1.4 scan"
+
+
+@requires_db
+def test_review_preview_renders_png(client, reset_db):
+    import fitz
+    run_id = _make_flagged_run()
+    # no file stored yet → 404
+    assert client.get(f"/review/{run_id}/preview", headers=_hdr("manager", MGR)).status_code == 404
+    # a real one-page PDF renders to a PNG (either role)
+    doc = fitz.open()
+    doc.new_page()
+    pdf = doc.tobytes()
+    doc.close()
+    recorder.store_invoice_file(run_id, pdf, filename="x.pdf")
+    r = client.get(f"/review/{run_id}/preview", headers=_hdr("clerk", CLERK))
+    assert r.status_code == 200
+    assert r.headers["content-type"] == "image/png"
+    assert r.content[:8] == b"\x89PNG\r\n\x1a\n"
