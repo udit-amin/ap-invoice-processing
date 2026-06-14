@@ -78,7 +78,7 @@ def review_queue() -> list[dict[str, Any]]:
 def review_detail(run_id: str) -> dict[str, Any] | None:
     """Full context for working a flagged run: the verdict (reason, drivers,
     review_payload), the persisted extraction (fields + per-field confidence),
-    the 6-check evidence, and the per-line reconciliation detail for the
+    the 7-check evidence, and the per-line reconciliation detail for the
     side-by-side view. Returns None if the run has no verdict.
 
     Not owner-restricted — the review queue is global, so either role may open

@@ -1,5 +1,5 @@
 """'What the system saw' building blocks: extracted fields (with low-confidence
-marks), the six-check evidence, the per-line invoice-vs-PO table, and the
+marks), the seven-check evidence, the per-line invoice-vs-PO table, and the
 original scan. Pure rendering — all data comes from the API.
 """
 from __future__ import annotations
@@ -37,7 +37,7 @@ def fields_panel(extraction: dict | None, conf_threshold: float = 0.80) -> None:
 
 
 def checks_panel(checks: list[dict] | None) -> None:
-    """The six validation checks with pass/fail/skip + the plain-English reason."""
+    """The seven validation checks with pass/fail/skip + the plain-English reason."""
     if not checks:
         st.caption("No validation evidence stored.")
         return

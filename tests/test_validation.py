@@ -202,3 +202,25 @@ def test_line_recon_embedded_tax_unknown_rate_skips():
     )
     r = checks.check_line_reconciliation(extracted, PO_5010)
     assert r["status"] == "skip"
+
+
+# ---- check 7: tax presence (pure; no PO, no amounts) ----
+
+def test_tax_present_separated_passes():
+    assert checks.check_tax_present(_extracted([], tax_treatment="separated"))["status"] == "pass"
+
+
+def test_tax_present_embedded_passes():
+    assert checks.check_tax_present(_extracted([], tax_treatment="embedded"))["status"] == "pass"
+
+
+def test_tax_present_none_fails():
+    r = checks.check_tax_present(_extracted([], tax_treatment="none"))
+    assert r["status"] == "fail" and "tax" in r["reason"].lower()
+
+
+def test_tax_present_unknown_skips():
+    # The answer-key / dry-run shape carries treatment=null → skip, not fail, so
+    # the verdict matrix is unchanged when tax isn't modelled.
+    assert checks.check_tax_present(_extracted([], tax_treatment=None))["status"] == "skip"
+    assert checks.check_tax_present({})["status"] == "skip"

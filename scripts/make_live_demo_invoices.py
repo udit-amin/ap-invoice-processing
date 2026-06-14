@@ -9,6 +9,7 @@ are deterministic:
     DELL/2026/0614  → Dell / PO-5001, total = PO exactly        → APPROVE  (happy path)
     GLX/2026/0614   → Globex (unapproved vendor) / PO-5002       → REJECT   (edge)
     TG/2026/0614    → TechGear / PO-5009, total ₹8.02L > ceiling → FLAG     (edge, over-authority)
+    FF/2026/0614-NT → FastFreight / PO-5011, no tax shown        → FLAG     (edge, missing tax)
 
 They land in data/demo_live/. Keep them on the presenter's laptop and drag them
 into the deployed UI's Run view. Reseed history (which resets PO balances) before
@@ -68,6 +69,17 @@ def build_demo_specs() -> list[InvoiceSpec]:
     specs.append(InvoiceSpec(
         "demo_flag_techgear.pdf", "TechGear Distributors", "TG/2026/0614",
         "2026-06-14", "PO-5009", items, "separated", 18, sub, tax, tot,
+    ))
+
+    # FLAG (missing tax) — FastFreight / PO-5011. PO-5011 is stored ex-tax, so the
+    # line + total match exactly and every other check passes; the invoice shows
+    # NO tax (treatment "none"), so only tax_present fails → a clean missing-tax FLAG.
+    items = _items(("Inter-state freight (zero-rated)", 1, 200000))
+    sub = sum(i.line_total for i in items)
+    specs.append(InvoiceSpec(
+        "demo_flag_notax.pdf", "FastFreight Logistics", "FF/2026/0614-NT",
+        "2026-06-14", "PO-5011", items, "none", None,
+        subtotal=sub, tax_amount=None, total=sub,
     ))
 
     return specs
