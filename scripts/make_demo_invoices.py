@@ -4,13 +4,14 @@ reset (no duplicate clashes) and mapped to the seeded POs.
   data/demo/batch/  — a straight-through batch (no human review):
         3 APPROVE (Stellar/PO-5005, Nimbus/PO-5008, Apex/PO-5007) + 2 REJECT
         (Globex — unapproved vendor; Quanta — closed PO-5003).
-  data/demo/edges/  — flag-producing invoices to upload one at a time:
-        over-ceiling (TechGear/PO-5009, ₹8.02L > ₹7.5L) and missing-tax
-        (FastFreight/PO-5011, no GST). Duplicate detection: re-drag any batch file.
+  data/demo/edges/  — invoices to upload one at a time:
+        over-ceiling (TechGear/PO-5009, ₹8.02L > ₹7.5L → FLAG) and a scanned
+        image (GreenLeaf/PO-5006, image-only → runs the vision path; reads cleanly
+        and APPROVEs). Duplicate detection: re-drag any batch file.
 
-The two *starting* flags (line-variance + low-confidence scan) are seeded
-separately by the reset (app/admin/service.py), so the demo opens with a non-empty
-queue and the batch + edges build the rest up live.
+The two *starting* flags (line-variance + missing-tax) are seeded separately by
+the reset (app/admin/service.py), so the demo opens with a non-empty queue and the
+batch + edges build the rest up live.
 
     .venv/bin/python scripts/make_demo_invoices.py
 """
@@ -24,7 +25,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from app import config                                              # noqa: E402
 from app.generate import invoice_generator as gen                   # noqa: E402
 from app.generate.invoice_generator import (                        # noqa: E402
-    InvoiceSpec, LineItem, _render_pdf_bytes, _separated,
+    InvoiceSpec, LineItem, _render_pdf_bytes, _rasterise_to_image_pdf, _separated,
 )
 
 DEMO_DIR = config.DATA_DIR / "demo"
@@ -38,6 +39,7 @@ _DEMO_VENDOR_META = {
     "TechGear Distributors":      ("29HHHHH0007H1Z1", "Net-30"),
     "Quanta Networks":            ("29AAAAA0009A1Z7", "Net-30"),
     "Globex Corporation":         ("07GGGGG0006G1Z0", "Net-30"),
+    "GreenLeaf Facilities Management": ("29AAAAA0010A1Z6", "Net-15"),
 }
 
 
@@ -78,12 +80,16 @@ def edge_specs() -> list[InvoiceSpec]:
     over = _sep("edge_over_ceiling_techgear.pdf", "TechGear Distributors", "TG-2026-0511",
                 "PO-5009", _items(("Laptop (TechGear TG-500)", 10, 65000),
                                   ("Wireless Headphones", 10, 3000)))
-    # missing-tax: FastFreight / PO-5011 (stored ex-tax) → only tax_present fails.
-    items = _items(("Inter-state freight (zero-rated)", 1, 200000))
-    notax = InvoiceSpec("edge_missing_tax_fastfreight.pdf", "FastFreight Logistics",
-                        "FF-2026-0614", "2026-06-14", "PO-5011", items, "none", None,
-                        subtotal=200000.0, tax_amount=None, total=200000.0)
-    return [over, notax]
+    # scanned image: GreenLeaf / PO-5006, rendered image-only so the vision path
+    # runs. It reads cleanly and matches the PO → APPROVE (shows scan handling).
+    items = _items(("Monthly Housekeeping - May", 1, 65000),
+                   ("Deep Cleaning (one-time)", 1, 18000))
+    sub = sum(i.line_total for i in items)
+    tax, tot = _separated(sub)
+    scan = InvoiceSpec("edge_scanned_greenleaf.pdf", "GreenLeaf Facilities Management",
+                       "GLF-2026-0440", "2026-06-13", "PO-5006", items, "separated", 18,
+                       sub, tax, tot, scanned=True)
+    return [over, scan]
 
 
 def main() -> None:
@@ -91,8 +97,13 @@ def main() -> None:
     for sub, specs in (("batch", batch_specs()), ("edges", edge_specs())):
         out = DEMO_DIR / sub
         out.mkdir(parents=True, exist_ok=True)
+        for stale in out.glob("*.pdf"):   # idempotent: drop any prior set
+            stale.unlink()
         for spec in specs:
-            (out / spec.filename).write_bytes(_render_pdf_bytes(spec))
+            pdf = _render_pdf_bytes(spec)
+            if spec.scanned:  # image-only so the vision path runs (reads cleanly)
+                pdf = _rasterise_to_image_pdf(pdf)
+            (out / spec.filename).write_bytes(pdf)
             print(f"  demo/{sub}/{spec.filename:34s} {spec.invoice_number:14s} {spec.vendor_name}")
     print("\nBatch = straight-through (3 APPROVE + 2 REJECT); edges = flags to upload one at a time.")
 

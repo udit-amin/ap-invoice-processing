@@ -29,15 +29,6 @@ from validate_all import (
     ANSWER_KEY_PATH, _answer_key_to_extracted, _reset_po_balances,
 )
 
-# The demo starts with two flagged runs already in the queue (the richest review
-# views: a line-variance side-by-side and a low-confidence scan). fixture → days-ago
-# so they read as aging work.
-_SCHEDULE = {
-    "edge_4_dell_line_mismatch.pdf": 2,   # line-variance
-    "edge_1_greenleaf_scanned.pdf": 1,    # low-confidence scan
-}
-
-
 def _truncate_and_reseed_reference() -> None:
     _seed.seed()  # reference data + policy (incl. cost constants)
     with cursor() as cur:
@@ -48,7 +39,39 @@ def _truncate_and_reseed_reference() -> None:
         )
 
 
-def _process(filename: str, extracted: dict, when: datetime) -> str:
+def _missing_tax_seed_case() -> tuple[dict, bytes]:
+    """A synthetic FastFreight / PO-5011 invoice with no tax → missing-tax FLAG.
+
+    The answer key never models tax (treatment is null → tax_present skips), so the
+    seed builds this extraction directly and renders a matching PDF to store. Every
+    other check passes (PO-5011 is stored ex-tax), so the only flag is tax_present.
+    """
+    from app.generate import invoice_generator as gen
+    from app.generate.invoice_generator import InvoiceSpec, LineItem, _render_pdf_bytes
+    gen._VENDOR_META.setdefault("FastFreight Logistics", ("24CCCCC0002C1Z4", "Net-45"))
+    spec = InvoiceSpec("demo_seed_missing_tax.pdf", "FastFreight Logistics", "FF-2026-0588",
+                       "2026-06-12", "PO-5011",
+                       [LineItem("Inter-state freight (zero-rated)", 1, 200000.0, 200000.0)],
+                       "none", None, subtotal=200000.0, tax_amount=None, total=200000.0)
+    extraction = {
+        "source_type": "text", "invoice_number": "FF-2026-0588",
+        "vendor_name": "FastFreight Logistics", "invoice_date": "2026-06-12",
+        "po_reference": "PO-5011", "currency": "INR",
+        "line_items": [{"description": "Inter-state freight (zero-rated)", "quantity": 1,
+                        "unit_price": 200000, "line_total": 200000,
+                        "is_bundle": False, "bundle_components": []}],
+        "subtotal": 200000,
+        "tax": {"amount": 0, "rate_pct": None, "treatment": "none"},
+        "total": 200000,
+        "extraction_confidence": {"invoice_number": 0.97, "vendor_name": 0.96,
+                                  "po_reference": 0.95, "total": 0.96, "overall": 0.96},
+        "extraction_notes": [], "error": None,
+    }
+    return extraction, _render_pdf_bytes(spec)
+
+
+def _process(filename: str, extracted: dict, when: datetime,
+             pdf_bytes: bytes | None = None) -> str:
     overall = (extracted.get("extraction_confidence") or {}).get("overall")
     run_id = recorder.start_run(
         invoice_path=filename,
@@ -58,9 +81,11 @@ def _process(filename: str, extracted: dict, when: datetime) -> str:
         source_type=extracted.get("source_type"),
         actor_user_id=None, actor_role=None,  # harness = system actor
     )
-    pdf = config.INPUTS_DIR / filename
-    if pdf.exists():
-        recorder.store_invoice_file(run_id, pdf.read_bytes(), filename=filename)
+    if pdf_bytes is None:
+        pdf = config.INPUTS_DIR / filename
+        pdf_bytes = pdf.read_bytes() if pdf.exists() else None
+    if pdf_bytes:
+        recorder.store_invoice_file(run_id, pdf_bytes, filename=filename)
     recorder.store_extraction(run_id, extracted)
     recorder.log_event(run_id, recorder.INGEST, recorder.OK, {"invoice_path": filename})
     recorder.log_event(run_id, recorder.EXTRACT, recorder.OK,
@@ -70,7 +95,7 @@ def _process(filename: str, extracted: dict, when: datetime) -> str:
     commit.commit_decision(verdict, report.get("matched_po"), extracted.get("total"), run_id)
     recorder.finish_run(run_id, overall_conf=overall)
 
-    # Back-date everything for this run so the trend spans several days.
+    # Back-date everything for this run so it reads as aging work.
     with cursor() as cur:
         cur.execute("UPDATE pipeline_runs SET started_at=%s, finished_at=%s WHERE run_id=%s",
                     (when, when, run_id))
@@ -80,9 +105,9 @@ def _process(filename: str, extracted: dict, when: datetime) -> str:
 
 
 def reset_demo_data() -> dict:
-    """Wipe operational data and re-seed the back-dated demo history.
-
-    Returns {"runs": N, "tally": {APPROVE, FLAG, REJECT}, "days": D}.
+    """Wipe operational data and re-seed the demo's starting state: two flagged
+    runs already awaiting review — a line-variance side-by-side and a missing-tax
+    invoice. Returns {"runs": N, "tally": {...}, "days": D}.
     """
     if not ANSWER_KEY_PATH.exists():
         raise RuntimeError(f"Answer key not found at {ANSWER_KEY_PATH}")
@@ -91,11 +116,20 @@ def reset_demo_data() -> dict:
 
     now = datetime.now(timezone.utc)
     tally: dict[str, int] = {}
-    for filename, days_ago in _SCHEDULE.items():
-        _reset_po_balances()  # judge each invoice against the seeded baseline
-        extracted = _answer_key_to_extracted(filename, answer_key)
-        when = now - timedelta(days=days_ago, hours=days_ago, minutes=len(tally))
-        v = _process(filename, extracted, when)
+
+    def _tally(v: str) -> None:
         tally[v] = tally.get(v, 0) + 1
 
-    return {"runs": sum(tally.values()), "tally": tally, "days": len(set(_SCHEDULE.values()))}
+    # Flag 1 — line-variance (Dell), from the answer key.
+    _reset_po_balances()
+    _tally(_process("edge_4_dell_line_mismatch.pdf",
+                    _answer_key_to_extracted("edge_4_dell_line_mismatch.pdf", answer_key),
+                    now - timedelta(days=2, hours=2)))
+
+    # Flag 2 — missing tax (FastFreight), synthetic (the answer key has no tax).
+    _reset_po_balances()
+    extraction, pdf_bytes = _missing_tax_seed_case()
+    _tally(_process("demo_seed_missing_tax.pdf", extraction,
+                    now - timedelta(days=1, hours=1), pdf_bytes=pdf_bytes))
+
+    return {"runs": sum(tally.values()), "tally": tally, "days": 2}

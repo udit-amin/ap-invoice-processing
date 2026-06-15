@@ -197,11 +197,12 @@ edge uploads build the rest up live. The full clerk/manager walkthrough is in
 [USAGE.md](USAGE.md). Operationally:
 
 1. Generate the demo invoices: `python scripts/make_demo_invoices.py` → writes
-   `data/demo/batch/` (3 APPROVE + 2 REJECT) and `data/demo/edges/` (over-ceiling +
-   missing-tax FLAGs).
+   `data/demo/batch/` (3 APPROVE + 2 REJECT) and `data/demo/edges/` (over-ceiling FLAG
+   + a scanned invoice that runs the vision path and approves).
 2. Reset to the starting state any time: **Dashboard → Demo controls → Reset demo
    data** (or `python scripts/seed_demo_history.py`). This restores POs and re-seeds
-   the two flags, so the batch + edge uploads are repeatable.
+   the two starting flags (line-variance + missing-tax), so the batch + edge uploads
+   are repeatable.
 
 > Re-uploading an already-seen invoice returns **REJECT (duplicate)** by design —
 > reset (above) for a clean run, or use it deliberately to show the duplicate guard.

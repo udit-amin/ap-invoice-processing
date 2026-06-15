@@ -70,14 +70,15 @@ up live. Generate the demo invoices first: `python scripts/make_demo_invoices.py
 (writes `data/demo/batch/` and `data/demo/edges/`).
 
 1. **Manager → Review queue.** Two items are already waiting — a line-variance
-   (invoice lines don't reconcile to the PO) and a low-confidence scan. Open each to
+   (invoice lines don't reconcile to the PO) and a missing-tax invoice. Open each to
    show the tailored review view.
 2. **Clerk → Batch ingest.** Upload the five files in `data/demo/batch/`. The table comes
    back **all straight-through**: three APPROVE (within PO and ceiling) and two REJECT
    (an unapproved vendor and a closed PO). No human needed.
 3. **Clerk → Run view, one at a time, from `data/demo/edges/`:**
    - the TechGear invoice → **FLAG**: amount exceeds the auto-approve ceiling.
-   - the FastFreight invoice → **FLAG**: the invoice shows no tax.
+   - the GreenLeaf invoice is a **scanned image** → it runs the vision path, reads
+     cleanly at high confidence, and **APPROVEs** — showing the system handles scans.
    - re-upload any batch file → **REJECT (duplicate)** — it won't pay the same invoice twice.
 4. **Manager → Dashboard.** The queue and KPIs have filled in; open a run to show the
    audit trail. Optionally lower the ceiling in **Policy** and re-run a fresh invoice to
