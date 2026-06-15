@@ -52,6 +52,9 @@ services:
         value: production
       - key: PYTHONUNBUFFERED
         value: "1"
+      # Exposes the manager-only POST /admin/reset-demo (a demo affordance).
+      - key: ALLOW_DEMO_RESET
+        value: "true"
       - key: ANTHROPIC_API_KEY
         sync: false
 
@@ -90,6 +93,9 @@ services:
         value: production
       - key: PYTHONUNBUFFERED
         value: "1"
+      # Exposes the manager-only POST /admin/reset-demo (a demo affordance).
+      - key: ALLOW_DEMO_RESET
+        value: "true"
       - key: ANTHROPIC_API_KEY
         sync: false
 

@@ -69,6 +69,15 @@ def get_environment() -> str:
     return (_read_env_value("ENVIRONMENT") or "development").lower()
 
 
+def demo_reset_enabled() -> bool:
+    """Whether the destructive `POST /admin/reset-demo` endpoint is available.
+
+    Off by default (a real deployment never wants a one-click data wipe); the
+    demo Render services set ALLOW_DEMO_RESET=true to expose the reset button.
+    """
+    return (_read_env_value("ALLOW_DEMO_RESET") or "").strip().lower() in ("1", "true", "yes")
+
+
 # --------------------------------------------------------------------------- #
 # Auth / JWT (v3)
 # --------------------------------------------------------------------------- #

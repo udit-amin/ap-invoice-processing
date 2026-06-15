@@ -78,17 +78,23 @@ API_BASE_URL=http://localhost:8000 .venv/bin/streamlit run ui/app.py
 Demo logins: `priya@/rahul@zamp.ai` (clerk), `anjali@/vikram@zamp.ai` (manager);
 passwords `demo-clerk-1/2`, `demo-mgr-1/2`.
 
-## 4. The ingest worker (landing → archive)
+## 4. The ingest worker (landing → archive) + batch on the deploy
 
-Sweeps the landing area, runs each PDF through the pipeline, and moves it to
-`archive/<YYYYMMDD>/`. A file that fails to process **stays in landing** for
-retry (route to a DLQ in production).
+Sweeps the landing area (recursively, so a date-partitioned
+`landing/<YYYYMMDD>/` works), runs each PDF through the pipeline, and moves it to
+`archive/<YYYYMMDD>/` under the same date. A file that fails to process **stays in
+landing** for retry (route to a DLQ in production).
 
 ```bash
 .venv/bin/python -m app.ingest.worker                 # data/landing → data/archive
 .venv/bin/python -m app.ingest.worker --seed          # copy demo fixtures into landing first
 .venv/bin/python -m app.ingest.worker --landing /mnt/landing --archive /mnt/archive
 ```
+
+> **On the Render deploy there's no S3 and the disk is ephemeral**, so the worker's
+> folders aren't a batch source there. The deployed **batch entry is the UI's Batch
+> ingest page (multi-file upload)** — the same `process_invoice` per file. The S3
+> landing→archive worker is the AWS production design (and the local simulation above).
 
 On AWS: an EventBridge schedule starts this as an ECS task on an interval, or an
 S3 `ObjectCreated` event triggers a per-object run. It calls the same pipeline as
@@ -121,8 +127,12 @@ queue, the **Processed** view, and the dashboard. It needs `DATABASE_URL` +
   *Reject (override)*. Recorded on the trail with the actor. (Note: a manual
   reject *after* an auto-approve records the override but does **not** reverse a
   committed PO draw-down — issue a compensating credit out-of-band.)
-- **Clean operational state (demo):** truncate the operational tables (keep
-  reference data), then reseed history:
+- **Clean operational state (demo):** easiest is the manager's **Dashboard → ⚠️ Demo
+  controls → Reset demo data** button (`POST /admin/reset-demo`), which truncates the
+  operational tables, keeps reference data, and re-seeds the 5-day back-dated history
+  (6/3/2). It's **gated by `ALLOW_DEMO_RESET=true`** (set on the demo services only) and
+  manager-only — leave the env unset in a real production so processed data can't be
+  wiped by a click. Equivalent CLI: `python scripts/seed_demo_history.py`. Or raw:
   ```sql
   TRUNCATE review_actions, governance_events, validation_reports,
            verdicts, invoices, invoice_files, pipeline_runs RESTART IDENTITY CASCADE;

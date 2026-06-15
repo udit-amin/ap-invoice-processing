@@ -44,6 +44,9 @@ auditable — only *extraction* calls the model.
 The UI holds **no business logic** — it calls endpoints and renders. The
 worker and the API both call the *same* `process_invoice`, so an invoice gets an
 identical trail whether a clerk uploaded it or it arrived in the landing bucket.
+Batches arrive as an S3 *landing* prefix partitioned by date that the worker sweeps
+to an *archive* prefix under the same date; the Render demo (no S3) ingests a batch
+via the UI's multi-file upload instead — the same pipeline either way.
 
 ## 3. AWS topology
 

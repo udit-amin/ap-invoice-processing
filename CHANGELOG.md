@@ -5,6 +5,27 @@ All notable changes to this project are documented here. The format follows
 labelled milestones (`v1`, `v2`, `v3.x`) rather than on a fixed release cadence;
 each PR adds an entry.
 
+## [v4.5] — Batch upload showcase + one-click demo reset
+
+### Added
+- **Batch ingest via multi-file upload** (`ui/views/batch_ingest.py`) — drag several
+  PDFs (e.g. the 4 in `data/demo_live/`) → each through `process_invoice` → a
+  mixed-verdict results table. Works on the deployment (no S3/filesystem dependency); a
+  server-folder mode stays for local/worker parity. The S3 landing→archive worker remains
+  the production design; the worker now sweeps `landing` recursively so a date-partitioned
+  `landing/<YYYYMMDD>/` works.
+- **"Reset demo data" button** (manager, Dashboard → Demo controls) backed by
+  `POST /admin/reset-demo` (`app/admin/`) — truncates operational data and re-seeds the
+  5-day back-dated history (6/3/2). **Gated by `ALLOW_DEMO_RESET`** (on for the demo
+  Render services, off in real prod) and manager-only. `scripts/seed_demo_history.py` is
+  now a thin wrapper over the shared `app.admin.service.reset_demo_data` (one source of
+  truth). New `tests/test_admin.py` (role-gated, env-gated, returns 6/3/2).
+
+### Changed
+- Docs (DEMO/ARCHITECTURE/OPERATIONS/README) clarify the **deployment batch entry =
+  UI multi-file upload** vs the **production S3 landing→archive (date-partitioned)
+  worker**, and document the reset button + `ALLOW_DEMO_RESET`.
+
 ## [v4.4] — Tax-presence check (7th validation check)
 
 Adds a tax control: an invoice must declare tax, otherwise it's flagged.

@@ -251,10 +251,10 @@ seeded user; the sidebar shows only the pages your role can use:
 | Page | clerk | manager | What it does |
 |------|:---:|:---:|------|
 | **Run view** | ✅ | — | Upload a PDF → the seven stages light up from the **real** governance events → decision card + "what the system saw" |
-| **Batch ingest** | ✅ | — | Process every PDF in a server-side folder through the pipeline → progress + a results table |
-| **Review queue** | ✅ | ✅ | Flagged items (oldest-first) with a distinct view per flag type: line-variance side-by-side, over-ceiling amount, low-confidence scan + flagged fields → approve / reject / escalate |
+| **Batch ingest** | ✅ | — | Upload several PDFs at once (or point at a server-side folder) → each through the pipeline → progress + a results table. The deployment's batch entry (prod = an S3 landing→archive worker, date-partitioned) |
+| **Review queue** | ✅ | ✅ | Flagged items (oldest-first) with a distinct view per flag type: line-variance side-by-side, over-ceiling amount, low-confidence scan + flagged fields, missing-tax → approve / reject / escalate |
 | **Processed** | ✅ | ✅ | Every AI decision (clerk → own, manager → all) — monitor it or **manually reject (override)** |
-| **Dashboard** | — | ✅ | Five KPI cards (+ an honest quality-monitoring placeholder), flag/rejection breakdowns, a 30-day trend, and a filterable runs table with an audit drill-in |
+| **Dashboard** | — | ✅ | Five KPI cards (+ an honest quality-monitoring placeholder), flag/rejection breakdowns, a 30-day trend, a filterable runs table with an audit drill-in, and **Demo controls → Reset demo data** (gated by `ALLOW_DEMO_RESET`) |
 | **Policy** | — | ✅ | Edit the auto-approve ceiling / confidence gate live (a subsequent fresh run reflects it) |
 
 The run view's stage replay paces the **real** events the backend emitted (the
