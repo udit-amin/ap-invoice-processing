@@ -18,17 +18,20 @@ _VERDICTS = {"APPROVE", "FLAG", "REJECT"}
 @router.get("/runs")
 def list_runs(
     verdict: str | None = Query(default=None, description="Filter by APPROVE|FLAG|REJECT"),
+    settled: bool = Query(default=False, description="Only runs done with review (Processed tab)"),
     limit: int = Query(default=50, ge=1, le=200),
     offset: int = Query(default=0, ge=0),
     user: CurrentUser = Depends(get_current_user),
 ):
-    """List processed runs (clerk → own, manager → all)."""
+    """List processed runs (clerk → own, manager → all). `settled=true` excludes
+    flags still awaiting human review (the Processed tab)."""
     if verdict is not None and verdict.upper() not in _VERDICTS:
         raise HTTPException(status_code=422, detail="verdict must be APPROVE, FLAG, or REJECT")
     runs = models.list_runs(
         role=user.role,
         actor_user_id=user.user_id,
         verdict=verdict.upper() if verdict else None,
+        settled=settled,
         limit=limit,
         offset=offset,
     )

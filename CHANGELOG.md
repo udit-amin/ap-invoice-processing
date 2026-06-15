@@ -5,6 +5,21 @@ All notable changes to this project are documented here. The format follows
 labelled milestones (`v1`, `v2`, `v3.x`) rather than on a fixed release cadence;
 each PR adds an entry.
 
+## [v4.6] — Review workflow: two-tier queue, manager overrides, reviewer identity
+
+### Changed
+- **Review queue is role-scoped.** A clerk works first-line flags; **Escalate** routes an
+  item to the **manager's** queue (a manager's queue is the escalated items). Managers are
+  the final tier (no escalate button).
+- **Processed tab shows only *settled* invoices** — a flagged invoice appears here once a
+  human has reviewed it (`GET /invoices/runs?settled=true`); pending/escalated flags stay
+  in the queue.
+- **Managers can flip a settled verdict** (APPROVE ↔ REJECT) from Processed, with a
+  required note; clerks are view-only.
+- **Reviewer identity + note surfaced.** A review action records the reviewer's **email**
+  (`review_actions.actor_email`); the Processed detail shows who reviewed it, when, and
+  their note (`review_detail.latest_action`; runs list carries `last_action_by`/`_note`).
+
 ## [v4.5] — Batch ingest, demo reset, and a docs cleanup
 
 ### Added

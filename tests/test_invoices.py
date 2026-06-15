@@ -111,6 +111,24 @@ def test_verdict_filter(client, reset_db):
 
 
 @requires_db
+def test_settled_excludes_pending_flags_until_reviewed(client, reset_db):
+    _make_run(CLERK_A, "INV-APP", _PASS)               # APPROVE → settled
+    flag_id = _make_run(CLERK_A, "INV-FLAG", _STRICT)  # FLAG → pending review
+
+    nums = {r["invoice_number"] for r in client.get(
+        "/invoices/runs?settled=true", headers=_hdr("manager", MGR)).json()["runs"]}
+    assert "INV-APP" in nums and "INV-FLAG" not in nums  # pending flag hidden
+
+    # Resolve the flag → it becomes settled and now shows, stamped with the reviewer.
+    client.post(f"/review/{flag_id}/action", headers=_hdr("manager", MGR),
+                json={"action": "reject", "note": "bad PO"})
+    settled = client.get("/invoices/runs?settled=true",
+                         headers=_hdr("manager", MGR)).json()["runs"]
+    row = next(r for r in settled if r["invoice_number"] == "INV-FLAG")
+    assert row["last_action"] == "reject" and row["last_action_by"] == f"{MGR}@x.com"
+
+
+@requires_db
 def test_run_detail_404_for_other_clerk(client, reset_db):
     run_id = _make_run(CLERK_A, "INV-A1", _STRICT)
     r = client.get(f"/invoices/runs/{run_id}", headers=_hdr("clerk", CLERK_B))
