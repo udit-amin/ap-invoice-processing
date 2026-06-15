@@ -176,6 +176,13 @@ def get_audit(invoice_number: str) -> dict[str, Any]:
     return _json(r)
 
 
+def reset_demo() -> dict[str, Any]:
+    """POST /admin/reset-demo (manager) → re-seed back-dated demo history."""
+    r = _send("post",f"{API_BASE_URL}/admin/reset-demo",
+                      headers=_headers(), timeout=_PROCESS_TIMEOUT)
+    return _json(r)
+
+
 # --------------------------------------------------------------------------- #
 # Translation layer — internal names → labels for the non-technical buyer.
 # Kept here (one place) per handover §10.

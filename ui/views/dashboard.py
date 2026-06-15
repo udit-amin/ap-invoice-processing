@@ -52,6 +52,8 @@ def render() -> None:
     _band_trend()
     st.divider()
     _band_runs()
+    st.divider()
+    _demo_controls()
 
 
 def _delta_pts(d):
@@ -165,6 +167,23 @@ def _band_runs() -> None:
         if inv:
             st.divider()
             _audit(inv)
+
+
+def _demo_controls() -> None:
+    with st.expander("⚠️ Demo controls"):
+        st.caption("Clears all processed runs and restores every PO to its baseline — a "
+                   "clean slate between demo takes. Reference data (vendors, POs, policy, "
+                   "users) is preserved.")
+        confirm = st.checkbox("I understand this clears all processed invoices", key="reset_confirm")
+        if st.button("🔄 Reset demo data", type="primary", disabled=not confirm):
+            try:
+                api_client.reset_demo()
+            except api_client.ApiError as exc:
+                st.error(exc.friendly())
+                return
+            st.cache_data.clear()  # KPIs/trends/runs are cached — refresh them
+            st.toast("Demo data reset — clean slate.", icon="🔄")
+            st.rerun()
 
 
 def _audit(invoice_number: str) -> None:

@@ -5,6 +5,30 @@ All notable changes to this project are documented here. The format follows
 labelled milestones (`v1`, `v2`, `v3.x`) rather than on a fixed release cadence;
 each PR adds an entry.
 
+## [v4.5] — Batch ingest, demo reset, and a docs cleanup
+
+### Added
+- **Batch ingest via multi-file upload** (`ui/views/batch_ingest.py`) — drag several
+  PDFs → each through `process_invoice` → a mixed-verdict results table. Works on the
+  deployment (no S3/filesystem dependency); a server-folder mode stays for local/worker
+  parity. The worker now sweeps `landing` recursively so a date-partitioned
+  `landing/<YYYYMMDD>/` works, mirroring the archive partition.
+- **"Reset demo data" button** (manager, Dashboard → Demo controls) backed by
+  `POST /admin/reset-demo` (`app/admin/`) — clears all processed runs and restores POs to
+  baseline (a clean slate). **Gated by `ALLOW_DEMO_RESET`** (on for the demo Render
+  services, off in real prod) and manager-only. `scripts/seed_demo_history.py` is a thin
+  wrapper over the shared `app.admin.service.reset_demo_data`. New `tests/test_admin.py`.
+- **Curated demo data** — `scripts/make_demo_invoices.py` emits a straight-through
+  `data/demo/batch/` (3 APPROVE + 2 REJECT) and `data/demo/edges/` (the edge cases to walk
+  through one at a time: over-ceiling, missing-tax, line-variance → FLAG; a scanned invoice
+  → APPROVE via the vision path). The demo starts on a clean slate and builds up live.
+
+### Changed
+- **Docs trimmed to four** (`docs/`): Operations (now also covers deploy + CI/CD),
+  Usage (how to work the UI + the demo walkthrough), API, and Architecture (rewritten
+  Render-centric). Removed the demo/deployment/manual-testing/db-querying docs; README
+  slimmed to an overview.
+
 ## [v4.4] — Tax-presence check (7th validation check)
 
 Adds a tax control: an invoice must declare tax, otherwise it's flagged.
@@ -45,7 +69,7 @@ changes — pipelines + branch strategy + docs.
   matching Render **deploy hook(s)**. Skips gracefully (a warning, never a failure)
   when a hook secret is absent, so it's inert until configured.
 - **`feature → develop → staging → production`** branch strategy, documented in
-  [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md) (secrets, per-env Render services, disabling
+  [docs/OPERATIONS.md](docs/OPERATIONS.md) (secrets, per-env Render services, disabling
   Render auto-deploy so CI gates, and branch protection). `render.yaml` provisions
   **both** environments (staging + production service sets, branch-pinned,
   `autoDeploy: false`) in one Blueprint.
@@ -71,9 +95,9 @@ and self-bootstraps; this round is deploy artifacts + demo tooling + docs.
   fresh-numbered PDFs (Dell→APPROVE, Globex→REJECT, TechGear→FLAG) into
   `data/demo_live/`, so the live happy-path upload is a clean APPROVE rather than a
   duplicate. Verdicts verified end-to-end through the real pipeline.
-- **[docs/DEMO.md](docs/DEMO.md)** — the operational-flow one-pager, a timed 5-minute
-  video script (happy path + edge cases + manager + close), the edge-case table, and a
-  live runbook (warm the URL, reset state, which files to upload).
+- **A demo guide** — operational-flow one-pager, a timed 5-minute video script (happy
+  path + edge cases + manager + close), and a live runbook (later folded into
+  [docs/USAGE.md](docs/USAGE.md)).
 
 ### Changed
 - `README.md` (a "Live deployment (Render)" section) and `docs/OPERATIONS.md` §3 (the
