@@ -5,26 +5,29 @@ All notable changes to this project are documented here. The format follows
 labelled milestones (`v1`, `v2`, `v3.x`) rather than on a fixed release cadence;
 each PR adds an entry.
 
-## [v4.5] — Batch upload showcase + one-click demo reset
+## [v4.5] — Batch ingest, demo reset, and a docs cleanup
 
 ### Added
 - **Batch ingest via multi-file upload** (`ui/views/batch_ingest.py`) — drag several
-  PDFs (e.g. the 4 in `data/demo_live/`) → each through `process_invoice` → a
-  mixed-verdict results table. Works on the deployment (no S3/filesystem dependency); a
-  server-folder mode stays for local/worker parity. The S3 landing→archive worker remains
-  the production design; the worker now sweeps `landing` recursively so a date-partitioned
-  `landing/<YYYYMMDD>/` works.
+  PDFs → each through `process_invoice` → a mixed-verdict results table. Works on the
+  deployment (no S3/filesystem dependency); a server-folder mode stays for local/worker
+  parity. The worker now sweeps `landing` recursively so a date-partitioned
+  `landing/<YYYYMMDD>/` works, mirroring the archive partition.
 - **"Reset demo data" button** (manager, Dashboard → Demo controls) backed by
-  `POST /admin/reset-demo` (`app/admin/`) — truncates operational data and re-seeds the
-  5-day back-dated history (6/3/2). **Gated by `ALLOW_DEMO_RESET`** (on for the demo
-  Render services, off in real prod) and manager-only. `scripts/seed_demo_history.py` is
-  now a thin wrapper over the shared `app.admin.service.reset_demo_data` (one source of
-  truth). New `tests/test_admin.py` (role-gated, env-gated, returns 6/3/2).
+  `POST /admin/reset-demo` (`app/admin/`) — truncates operational data, restores POs, and
+  re-seeds the demo's starting state. **Gated by `ALLOW_DEMO_RESET`** (on for the demo
+  Render services, off in real prod) and manager-only. `scripts/seed_demo_history.py` is a
+  thin wrapper over the shared `app.admin.service.reset_demo_data`. New `tests/test_admin.py`.
+- **Curated demo data** — `scripts/make_demo_invoices.py` emits a straight-through
+  `data/demo/batch/` (3 APPROVE + 2 REJECT) and `data/demo/edges/` (over-ceiling +
+  missing-tax FLAGs); the reset seeds **two starting flagged runs**, so the demo opens with
+  a non-empty queue and builds up live.
 
 ### Changed
-- Docs (DEMO/ARCHITECTURE/OPERATIONS/README) clarify the **deployment batch entry =
-  UI multi-file upload** vs the **production S3 landing→archive (date-partitioned)
-  worker**, and document the reset button + `ALLOW_DEMO_RESET`.
+- **Docs trimmed to four** (`docs/`): Operations (now also covers deploy + CI/CD),
+  Usage (how to work the UI + the demo walkthrough), API, and Architecture (rewritten
+  Render-centric). Removed the demo/deployment/manual-testing/db-querying docs; README
+  slimmed to an overview.
 
 ## [v4.4] — Tax-presence check (7th validation check)
 
@@ -66,7 +69,7 @@ changes — pipelines + branch strategy + docs.
   matching Render **deploy hook(s)**. Skips gracefully (a warning, never a failure)
   when a hook secret is absent, so it's inert until configured.
 - **`feature → develop → staging → production`** branch strategy, documented in
-  [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md) (secrets, per-env Render services, disabling
+  [docs/OPERATIONS.md](docs/OPERATIONS.md) (secrets, per-env Render services, disabling
   Render auto-deploy so CI gates, and branch protection). `render.yaml` provisions
   **both** environments (staging + production service sets, branch-pinned,
   `autoDeploy: false`) in one Blueprint.
@@ -92,9 +95,9 @@ and self-bootstraps; this round is deploy artifacts + demo tooling + docs.
   fresh-numbered PDFs (Dell→APPROVE, Globex→REJECT, TechGear→FLAG) into
   `data/demo_live/`, so the live happy-path upload is a clean APPROVE rather than a
   duplicate. Verdicts verified end-to-end through the real pipeline.
-- **[docs/DEMO.md](docs/DEMO.md)** — the operational-flow one-pager, a timed 5-minute
-  video script (happy path + edge cases + manager + close), the edge-case table, and a
-  live runbook (warm the URL, reset state, which files to upload).
+- **A demo guide** — operational-flow one-pager, a timed 5-minute video script (happy
+  path + edge cases + manager + close), and a live runbook (later folded into
+  [docs/USAGE.md](docs/USAGE.md)).
 
 ### Changed
 - `README.md` (a "Live deployment (Render)" section) and `docs/OPERATIONS.md` §3 (the

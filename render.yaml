@@ -10,7 +10,7 @@
 # `ap-ui-<env>` URL of the environment you're showing.
 #
 # Apply once: Render → New → Blueprint → pick this repo (reads render.yaml from the
-# default branch, `develop`). Then, per service, see docs/DEPLOYMENT.md:
+# default branch, `develop`). Then, per service, see docs/OPERATIONS.md §3:
 #   - set ANTHROPIC_API_KEY on each *-api service (secret),
 #   - set API_BASE_URL on each *-ui service to its sibling api URL,
 #   - copy each service's Deploy Hook into the matching GitHub secret

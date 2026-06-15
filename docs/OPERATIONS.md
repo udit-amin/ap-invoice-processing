@@ -1,7 +1,8 @@
 # Operations guide
 
-Running, monitoring, and troubleshooting the AP invoice processor — locally and
-on AWS. For *how it's built*, see [ARCHITECTURE.md](ARCHITECTURE.md); for
+Deploying, running, monitoring, and troubleshooting the AP invoice processor —
+locally and on Render (it scales to AWS unchanged). For *how it's built*, see
+[ARCHITECTURE.md](ARCHITECTURE.md); for using the app, [USAGE.md](USAGE.md); for
 endpoints, [API.md](API.md).
 
 ---
@@ -34,45 +35,67 @@ Governance knobs are **data**, not env: `policy_config` (auto-approve ceiling,
 confidence gate, per-PO tolerance, severity map, manual/auto per-invoice costs).
 Edit live via `PUT /policy` or the Policy page — no redeploy.
 
-## 3. Deploy
+## 3. Deploy & CI/CD
 
-**AWS (outline)** — build the image → push to ECR → ECS Fargate services (API,
-UI) + an EventBridge-scheduled worker task; ALB in front; RDS Multi-AZ; landing
-+ archive S3 buckets; secrets in Secrets Manager. The API self-bootstraps the
-schema on startup, so first boot against an empty RDS just works; then seed
-reference data + users once:
+### Branch strategy
 
-```bash
-python -m app.db.seed       # vendors, POs + line items, policy_config (incl. costs)
-python -m app.users.seed    # the demo users (replace with real users in prod)
-```
+`feature/* → develop → staging → production`. `develop` is the integration branch
+(every PR runs CI; merging does not deploy). A PR merged into `staging` or
+`production` deploys **that** environment. Promote by PR — each hop re-runs the
+suite, so nothing reaches production untested.
 
-**Render (the live demo deployment)** — the same image, driven by `render.yaml`
-(Blueprint) at the repo root. One apply provisions **two environments**: staging
-(`ap-api-staging` + `ap-ui-staging` + `ap-invoices-db-staging`, branch `staging`)
-and production (`ap-api-prod` + `ap-ui-prod` + `ap-invoices-db-prod`, branch
-`production`). UI → API is server-side, so there's no CORS. Each service is
-`autoDeploy: false`; a merge into `staging`/`production` runs CI and, on green,
-the GitHub deploy hook deploys that environment (see [DEPLOYMENT.md](DEPLOYMENT.md)
-for the full step-by-step — Blueprint, env vars, `API_BASE_URL`, deploy-hook
-secrets, branch protection). The API self-applies the schema + seeds reference
-data + the 4 users on first boot; seed back-dated history per env from your laptop
-against each db's **External URL** (free tier has no Shell):
-`DATABASE_URL='<external-url>?sslmode=require' .venv/bin/python scripts/seed_demo_history.py`.
-The same external URL drives every reset/edit later (§6) without a shell.
+### Pipelines (GitHub Actions)
+
+- **CI** (`.github/workflows/ci.yml`) — every PR and push to `develop`: a Postgres
+  service, the full `pytest` suite, the `validate_all --dry-run` verdict-matrix
+  smoke, and a Docker build of the deploy image. Reusable via `workflow_call`.
+- **CD** (`.github/workflows/deploy.yml`) — on a merge into `staging`/`production`
+  (or manual dispatch): re-runs CI, then — only if green — POSTs that environment's
+  Render **deploy hook**. Skips with a warning (never fails) if a hook secret is
+  unset, so it's inert until configured.
+
+### Render (the live deployment)
+
+One image, driven by `render.yaml` (Blueprint) at the repo root. One apply
+provisions **two environments**: staging (`ap-api-staging`, `ap-ui-staging`,
+`ap-invoices-db-staging`, branch `staging`) and production (`ap-api-prod`,
+`ap-ui-prod`, `ap-invoices-db-prod`, branch `production`). UI → API is server-side,
+so there's no CORS. Each service is `autoDeploy: false` — deploys come only from the
+CI-gated GitHub hooks. First-time setup:
+
+1. Render → **New → Blueprint** → pick the repo (reads `render.yaml` from `develop`).
+2. Set `ANTHROPIC_API_KEY` on each `*-api` service; after the first deploy, set each
+   `*-ui` service's `API_BASE_URL` to its sibling api URL (e.g.
+   `https://ap-api-prod.onrender.com`).
+3. Copy each service's **Deploy Hook** into the GitHub secrets
+   `RENDER_DEPLOY_HOOK_{STAGING,PRODUCTION}_{API,UI}`.
+4. Seed each env's back-dated demo data from your laptop against the db's **External
+   URL** (free tier has no Shell): `DATABASE_URL='<external-url>?sslmode=require'
+   .venv/bin/python scripts/seed_demo_history.py`. The same URL drives every
+   reset/edit later (§6).
 
 The grader opens the **`ap-ui-prod`** URL. Free-tier services sleep after ~15 min
-idle (~30–60 s cold start) — warm the URLs before a demo, or use the Starter tier
-for the grading window. The video script + live runbook are in [DEMO.md](DEMO.md).
+idle (~30–60 s cold start) — warm the URLs before a demo, or use the Starter tier for
+the grading window. The demo walkthrough is in [USAGE.md](USAGE.md).
 
-**Local / demo**
+> A new `render.yaml` env (e.g. `ALLOW_DEMO_RESET`) needs a Blueprint **sync** in
+> Render to reach existing services, or set it on the service directly.
+
+### Scales to AWS
+
+The same image maps to ECS Fargate (API + UI services + a scheduled worker task)
+behind an ALB, with RDS Multi-AZ, S3 landing/archive buckets, and Secrets Manager —
+no code change. The API self-bootstraps the schema on first boot; seed reference data
++ users once (`python -m app.db.seed && python -m app.users.seed`).
+
+### Local
 
 ```bash
 docker compose up -d db
 .venv/bin/python -m app.db.seed && .venv/bin/python -m app.users.seed
 .venv/bin/python -m uvicorn app.main:app --reload
 API_BASE_URL=http://localhost:8000 .venv/bin/streamlit run ui/app.py
-.venv/bin/python scripts/seed_demo_history.py   # back-dated history so the dashboard isn't empty
+.venv/bin/python scripts/seed_demo_history.py   # the two starting flagged runs
 ```
 
 Demo logins: `priya@/rahul@zamp.ai` (clerk), `anjali@/vikram@zamp.ai` (manager);
@@ -129,10 +152,10 @@ queue, the **Processed** view, and the dashboard. It needs `DATABASE_URL` +
   committed PO draw-down — issue a compensating credit out-of-band.)
 - **Clean operational state (demo):** easiest is the manager's **Dashboard → ⚠️ Demo
   controls → Reset demo data** button (`POST /admin/reset-demo`), which truncates the
-  operational tables, keeps reference data, and re-seeds the 5-day back-dated history
-  (6/3/2). It's **gated by `ALLOW_DEMO_RESET=true`** (set on the demo services only) and
-  manager-only — leave the env unset in a real production so processed data can't be
-  wiped by a click. Equivalent CLI: `python scripts/seed_demo_history.py`. Or raw:
+  operational tables, restores every PO to its baseline, and re-seeds the **two starting
+  flagged runs**. It's **gated by `ALLOW_DEMO_RESET=true`** (set on the demo services
+  only) and manager-only — leave the env unset in a real production so processed data
+  can't be wiped by a click. Equivalent CLI: `python scripts/seed_demo_history.py`. Or raw:
   ```sql
   TRUNCATE review_actions, governance_events, validation_reports,
            verdicts, invoices, invoice_files, pipeline_runs RESTART IDENTITY CASCADE;
@@ -167,21 +190,21 @@ queue, the **Processed** view, and the dashboard. It needs `DATABASE_URL` +
 - **Suspected bad auto-approve:** open it in **Processed** → *Reject (override)*;
   consider lowering the ceiling or tightening the confidence gate via policy.
 
-## 8. Demo runbook
+## 8. Demo data
 
-1. Seed history: `python scripts/seed_demo_history.py` (5 days of back-dated runs).
-2. **Clerk (Priya):** Run view → upload a fresh PDF → watch the seven stages
-   replay → decision card. Then **Batch ingest** → point at `data/landing`
-   (`--seed` the worker first, or `cp data/inputs/*.pdf data/landing/`).
-3. **Automated path:** in a terminal, `python -m app.ingest.worker --seed` →
-   show files moving from `data/landing/` to `data/archive/<YYYYMMDD>/`.
-4. **Manager (Anjali):** Dashboard (KPIs, breakdowns, trend, runs table → audit
-   trail with actor names); **Processed** → override an auto-approve; **Review
-   queue** → work the three flag types; **Policy** → lower the ceiling, then
-   process a fresh invoice to show the verdict flip.
+The demo opens with **two flagged runs** already in the review queue; the batch and
+edge uploads build the rest up live. The full clerk/manager walkthrough is in
+[USAGE.md](USAGE.md). Operationally:
 
-> Tip: re-ingesting already-seen invoices returns **REJECT (duplicate)** by
-> design. Truncate operational tables (§6) for a clean APPROVE/FLAG demo.
+1. Generate the demo invoices: `python scripts/make_demo_invoices.py` → writes
+   `data/demo/batch/` (3 APPROVE + 2 REJECT) and `data/demo/edges/` (over-ceiling +
+   missing-tax FLAGs).
+2. Reset to the starting state any time: **Dashboard → Demo controls → Reset demo
+   data** (or `python scripts/seed_demo_history.py`). This restores POs and re-seeds
+   the two flags, so the batch + edge uploads are repeatable.
+
+> Re-uploading an already-seen invoice returns **REJECT (duplicate)** by design —
+> reset (above) for a clean run, or use it deliberately to show the duplicate guard.
 
 ## 9. SLOs & known limitations
 
