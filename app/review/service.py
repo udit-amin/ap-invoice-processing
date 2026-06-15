@@ -38,11 +38,21 @@ class ReviewError(Exception):
         super().__init__(detail)
 
 
-def review_queue() -> list[dict[str, Any]]:
-    """Flagged runs still awaiting a terminal decision, newest first."""
+def review_queue(role: str = "manager") -> list[dict[str, Any]]:
+    """Flagged runs still awaiting a terminal decision, newest first.
+
+    Two-tier and role-scoped: a clerk works first-line flags (not yet escalated);
+    **Escalate** sends an item up, so it leaves the clerk queue and appears in the
+    manager's queue. A manager's queue is the escalated items.
+    """
+    escalated = (
+        "EXISTS (SELECT 1 FROM review_actions ra WHERE ra.run_id = v.run_id "
+        "AND ra.action = 'escalate')"
+    )
+    tier = escalated if role == "manager" else f"NOT {escalated}"
     with cursor() as cur:
         cur.execute(
-            """SELECT v.run_id, v.invoice_number, v.po_reference, v.verdict,
+            f"""SELECT v.run_id, v.invoice_number, v.po_reference, v.verdict,
                       v.reason, v.review_payload, v.invoice_total, v.matched_po_id,
                       v.decided_at, r.vendor_name, r.actor_user_id
                FROM verdicts v
@@ -53,6 +63,7 @@ def review_queue() -> list[dict[str, Any]]:
                      SELECT 1 FROM review_actions ra
                      WHERE ra.run_id = v.run_id AND ra.action IN ('approve', 'reject')
                  )
+                 AND {tier}
                ORDER BY v.decided_at DESC""",
             (config.TENANT_ID,),
         )
@@ -108,6 +119,15 @@ def review_detail(run_id: str) -> dict[str, Any] | None:
         rep = cur.fetchone()
         cur.execute("SELECT EXISTS(SELECT 1 FROM invoice_files WHERE run_id = %s)", (run_id,))
         has_file = cur.fetchone()[0]
+        # The most recent human review action (who, what, note, when) — surfaced in
+        # the Processed tab when the invoice is opened.
+        cur.execute(
+            """SELECT action, actor_email, actor_role, note, created_at
+               FROM review_actions WHERE run_id = %s
+               ORDER BY created_at DESC LIMIT 1""",
+            (run_id,),
+        )
+        la = cur.fetchone()
 
     (verdict, reason, drivers, review_payload, conf, pver, inv_total,
      matched_po, ceiling, needs_review, decided, inv_no, vendor, po_ref,
@@ -146,6 +166,11 @@ def review_detail(run_id: str) -> dict[str, Any] | None:
         "checks": checks,
         "line_reconciliation": line_detail,
         "has_file": has_file,
+        "latest_action": (
+            {"action": la[0], "actor_email": la[1], "actor_role": la[2],
+             "note": la[3], "created_at": la[4].isoformat() if la[4] else None}
+            if la else None
+        ),
     }
 
 
@@ -158,6 +183,7 @@ def apply_review_action(run_id: str, action: str, note: str | None, actor: objec
         raise ReviewError(422, f"action must be one of {sorted(VALID_ACTIONS)}")
 
     actor_label, actor_user_id, actor_role = recorder.actor_fields(actor)
+    actor_email = getattr(actor, "email", None)
     status, action_type = _EVENT[action]
 
     with cursor(autocommit=False) as cur:
@@ -188,11 +214,11 @@ def apply_review_action(run_id: str, action: str, note: str | None, actor: objec
         cur.execute(
             """INSERT INTO review_actions
                (run_id, invoice_number, action, note, actor_user_id, actor_role,
-                po_balance_after)
-               VALUES (%s, %s, %s, %s, %s, %s, %s)
+                actor_email, po_balance_after)
+               VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
                RETURNING review_id, created_at""",
             (run_id, invoice_number, action, note, actor_user_id, actor_role,
-             po_balance_after),
+             actor_email, po_balance_after),
         )
         review_id, created_at = cur.fetchone()
 

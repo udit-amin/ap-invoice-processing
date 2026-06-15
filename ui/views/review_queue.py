@@ -8,6 +8,7 @@ import streamlit as st
 
 import api_client
 import fmt
+import session
 from components import decision_card, invoice_detail
 
 _SEL = "review_sel"
@@ -23,10 +24,14 @@ def render() -> None:
 
     # FIFO for fairness to vendors waiting on payment (presentation order).
     queue = sorted(data.get("queue") or [], key=lambda x: x.get("decided_at") or "")
-    st.caption(f"{len(queue)} item(s) awaiting review — oldest first.")
+    is_manager = session.role() == "manager"
+    if is_manager:
+        st.caption(f"{len(queue)} item(s) escalated for your review — oldest first.")
+    else:
+        st.caption(f"{len(queue)} flagged item(s) — approve, reject, or escalate to a manager.")
 
     if not queue:
-        st.success("Nothing in the queue. 🎉")
+        st.success("Nothing escalated to you. 🎉" if is_manager else "Nothing in the queue. 🎉")
         return
 
     for item in queue:
@@ -87,13 +92,17 @@ def _detail(run_id: str) -> None:
         decision_card.render(d)
 
     st.markdown("**Action**")
-    note = st.text_area("Note", key=f"note_{run_id}", placeholder="Optional note for the trail…")
-    a, b, c = st.columns(3)
-    if a.button("✅ Approve", key=f"appr_{run_id}", use_container_width=True):
+    note = st.text_area("Note", key=f"note_{run_id}",
+                        placeholder="Add a note — it's recorded and shown on the Processed tab…")
+    # Clerks can escalate to a manager; managers are the final reviewer (no escalate).
+    is_clerk = session.role() != "manager"
+    cols = st.columns(3 if is_clerk else 2)
+    if cols[0].button("✅ Approve", key=f"appr_{run_id}", use_container_width=True):
         _act(run_id, "approve", note)
-    if b.button("⛔ Reject", key=f"rej_{run_id}", use_container_width=True):
+    if cols[1].button("⛔ Reject", key=f"rej_{run_id}", use_container_width=True):
         _act(run_id, "reject", note)
-    if c.button("⬆️ Escalate", key=f"esc_{run_id}", use_container_width=True):
+    if is_clerk and cols[2].button("⬆️ Escalate to manager", key=f"esc_{run_id}",
+                                   use_container_width=True):
         _act(run_id, "escalate", note)
 
 
