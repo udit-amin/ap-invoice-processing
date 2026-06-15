@@ -47,7 +47,9 @@ def sweep(
     partition. Returns one result dict per file. A file that raises is left in
     place (not archived) so it can be retried."""
     results: list[dict[str, Any]] = []
-    for pdf in sorted(landing.glob("*.pdf")):
+    # rglob so a date-partitioned landing (landing/<YYYYMMDD>/…) works too,
+    # mirroring the archive partition; a flat landing still matches.
+    for pdf in sorted(landing.rglob("*.pdf")):
         if on_event:
             on_event(f"processing {pdf.name}")
         try:
@@ -98,7 +100,7 @@ def main() -> None:
         print(f"Landing folder not found: {args.landing}")
         return
 
-    pending = sorted(args.landing.glob("*.pdf"))
+    pending = sorted(args.landing.rglob("*.pdf"))
     if not pending:
         print(f"Nothing to ingest in {args.landing}.")
         return

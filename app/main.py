@@ -52,6 +52,7 @@ def create_app() -> FastAPI:
     from app.review.router import router as review_router
     from app.dashboard.router import router as dashboard_router
     from app.policy.router import router as policy_router
+    from app.admin.router import router as admin_router
 
     app.include_router(auth_router)
     app.include_router(pipeline_router)
@@ -60,6 +61,7 @@ def create_app() -> FastAPI:
     app.include_router(dashboard_router)
     app.include_router(audit_router)
     app.include_router(policy_router)
+    app.include_router(admin_router)
 
     @app.get("/health", tags=["meta"])
     def health():

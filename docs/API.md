@@ -5,8 +5,8 @@ response shape, status codes, and a runnable `curl`. Base URL in examples is
 `http://localhost:8000` (`uvicorn app.main:app --reload`). Interactive docs are
 at `/docs` (Swagger) and `/redoc`.
 
-For a quick overview see the table in [README](../README.md#running-the-api); for
-the data those endpoints write, see [QUERYING_THE_DB.md](QUERYING_THE_DB.md).
+For how it's built see [ARCHITECTURE.md](ARCHITECTURE.md); for using the app,
+[USAGE.md](USAGE.md); for running/operating it, [OPERATIONS.md](OPERATIONS.md).
 
 ---
 

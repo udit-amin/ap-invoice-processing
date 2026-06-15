@@ -2,8 +2,9 @@
 
 Guidance for Claude Code (and humans) working in this repo. Keep this current
 when architecture or invariants change. The user-facing overview is `README.md`;
-the endpoint reference is `docs/API.md`; version history is `CHANGELOG.md`; AWS
-deployment + ops live in `docs/ARCHITECTURE.md` / `docs/OPERATIONS.md`.
+docs are `docs/USAGE.md` (using the app), `docs/API.md` (endpoints),
+`docs/OPERATIONS.md` (deploy/run/runbooks), `docs/ARCHITECTURE.md` (how it's built,
+Render); version history is `CHANGELOG.md`.
 
 ## What this is
 
