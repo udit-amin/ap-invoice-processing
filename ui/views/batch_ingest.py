@@ -34,7 +34,7 @@ def render() -> None:
 
     with st.expander("Or process a server-side folder (local / worker parity)"):
         folder = st.text_input("Folder path (on the machine running this app)",
-                               value="data/demo_live")
+                               value="data/demo/batch")
         path = Path(folder).expanduser()
         if not path.is_dir():
             st.caption(f"Not a folder: `{folder}`")

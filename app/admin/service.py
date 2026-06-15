@@ -1,11 +1,14 @@
-"""Demo-data reset — truncate operational tables and re-seed a few days of
-back-dated runs so the dashboard, review queue, and trend look populated.
+"""Demo-data reset — truncate operational tables and re-seed the **starting state**
+for a demo: exactly two flagged runs already awaiting review.
 
-Demo-only and deliberately destructive. It reuses the **answer-key** pipeline
-(no model calls), so it runs on the deployed container (fixtures + answer key are
-baked into the image) with no Anthropic key. The 11 fixtures are each processed
-once with PO balances restored before each, so the verdict mix stays
-6 APPROVE / 3 FLAG / 2 REJECT — spread across recent days.
+The demo then builds up live — a straight-through batch (APPROVE/REJECT) and a few
+edge-case uploads (FLAGs) — so the queue and dashboard fill in on camera. This seeds
+only the two flags so the system doesn't start empty.
+
+Demo-only and deliberately destructive. It reuses the **answer-key** pipeline (no
+model calls), so it runs on the deployed container (fixtures + answer key are baked
+into the image) with no Anthropic key. Reference data is reseeded, which restores
+every PO to its baseline (reopens closed/drawn-down POs), so the demo is repeatable.
 
 This is the single source of truth for the reset; `scripts/seed_demo_history.py`
 is a thin CLI wrapper and `POST /admin/reset-demo` calls it behind a role + env gate.
@@ -26,20 +29,12 @@ from validate_all import (
     ANSWER_KEY_PATH, _answer_key_to_extracted, _reset_po_balances,
 )
 
-# fixture → days-ago (spread across ~5 days; the flags land recent so they
-# populate the live review queue, oldest-first).
+# The demo starts with two flagged runs already in the queue (the richest review
+# views: a line-variance side-by-side and a low-confidence scan). fixture → days-ago
+# so they read as aging work.
 _SCHEDULE = {
-    "normal_1_dell.pdf": 4,
-    "normal_2_stellar.pdf": 4,
-    "normal_3_fastfreight.pdf": 3,
-    "normal_4_apex.pdf": 3,
-    "normal_5_nimbus.pdf": 2,
-    "edge_3_blueprint_embedded_tax.pdf": 2,
-    "edge_1_greenleaf_scanned.pdf": 1,
-    "edge_6_cloudhost_closed_po.pdf": 1,
-    "edge_2_techgear_bundled.pdf": 0,
-    "edge_4_dell_line_mismatch.pdf": 0,
-    "edge_5_globex_unapproved.pdf": 0,
+    "edge_4_dell_line_mismatch.pdf": 2,   # line-variance
+    "edge_1_greenleaf_scanned.pdf": 1,    # low-confidence scan
 }
 
 

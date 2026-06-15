@@ -50,11 +50,13 @@ def test_reset_disabled_without_env(client, monkeypatch):
 
 
 @requires_db
-def test_reset_seeds_six_three_two_when_enabled(client, monkeypatch):
+def test_reset_seeds_two_flagged_runs_when_enabled(client, monkeypatch):
     monkeypatch.setenv("ALLOW_DEMO_RESET", "true")
     body = client.post("/admin/reset-demo", headers=_hdr("manager", MGR)).json()
-    assert body["runs"] == 11
-    assert body["tally"] == {"APPROVE": 6, "FLAG": 3, "REJECT": 2}
-    # The DB now holds exactly those 11 processed runs.
+    # The demo starts with exactly two flagged runs awaiting review; the batch +
+    # edge uploads build the rest up live.
+    assert body["runs"] == 2
+    assert body["tally"] == {"FLAG": 2}
     summary = client.get("/dashboard/summary", headers=_hdr("manager", MGR)).json()
-    assert summary["total_runs"] == 11
+    assert summary["total_runs"] == 2
+    assert summary["needs_review"] == 2
