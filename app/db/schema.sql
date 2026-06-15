@@ -201,6 +201,8 @@ CREATE TABLE IF NOT EXISTS review_actions (
 );
 CREATE INDEX IF NOT EXISTS idx_review_actions_run ON review_actions (run_id);
 CREATE INDEX IF NOT EXISTS idx_review_actions_invoice ON review_actions (invoice_number);
+-- Email of the acting reviewer, surfaced in the Processed tab ("who reviewed it").
+ALTER TABLE review_actions ADD COLUMN IF NOT EXISTS actor_email TEXT;
 
 -- --------------------------------------------------------------------------
 -- UI support (v4)

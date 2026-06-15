@@ -19,10 +19,15 @@ def list_runs(
     role: str,
     actor_user_id: str | None,
     verdict: str | None = None,
+    settled: bool = False,
     limit: int = 50,
     offset: int = 0,
 ) -> list[dict[str, Any]]:
-    """Run summaries, newest first. Clerks are restricted to their own runs."""
+    """Run summaries, newest first. Clerks are restricted to their own runs.
+
+    `settled=True` (the Processed tab) excludes flags still awaiting human review —
+    a run shows only once it's auto-decided (APPROVE/REJECT) or a human has resolved
+    the flag (approve/reject)."""
     where = ["r.tenant_id = %s"]
     params: list[Any] = [config.TENANT_ID]
     if role != MANAGER:
@@ -31,6 +36,12 @@ def list_runs(
     if verdict:
         where.append("v.verdict = %s")
         params.append(verdict)
+    if settled:
+        where.append(
+            "(v.verdict IS NOT NULL AND (v.verdict <> 'FLAG' OR EXISTS ("
+            "SELECT 1 FROM review_actions ra2 WHERE ra2.run_id = r.run_id "
+            "AND ra2.action IN ('approve', 'reject'))))"
+        )
     params.extend([limit, offset])
 
     with cursor() as cur:
@@ -39,11 +50,12 @@ def list_runs(
                        r.source_type, r.started_at, r.finished_at,
                        r.actor_user_id, r.actor_role,
                        v.verdict, v.requires_human_review, v.po_balance_after,
-                       v.invoice_total, r.overall_conf, la.action
+                       v.invoice_total, r.overall_conf,
+                       la.action, la.actor_email, la.note, la.created_at
                 FROM pipeline_runs r
                 LEFT JOIN verdicts v ON v.run_id = r.run_id
                 LEFT JOIN LATERAL (
-                    SELECT action FROM review_actions ra
+                    SELECT action, actor_email, note, created_at FROM review_actions ra
                     WHERE ra.run_id = r.run_id AND ra.action IN ('approve', 'reject')
                     ORDER BY ra.created_at DESC LIMIT 1
                 ) la ON TRUE
@@ -117,7 +129,8 @@ def get_run(run_id: str, *, role: str, actor_user_id: str | None) -> dict[str, A
 def _summary(row: tuple) -> dict[str, Any]:
     (run_id, inv, vendor, po, source, started, finished,
      actor_user_id, actor_role, verdict, needs_review, bal_after,
-     invoice_total, overall_conf, last_action) = row
+     invoice_total, overall_conf,
+     last_action, last_action_by, last_action_note, last_action_at) = row
     return {
         "run_id": str(run_id),
         "invoice_number": inv,
@@ -127,6 +140,9 @@ def _summary(row: tuple) -> dict[str, Any]:
         "verdict": verdict,
         "requires_human_review": needs_review,
         "last_action": last_action,  # latest terminal human action (approve/reject), or None
+        "last_action_by": last_action_by,      # email of the reviewer who took it
+        "last_action_note": last_action_note,
+        "last_action_at": last_action_at.isoformat() if last_action_at else None,
         "invoice_total": float(invoice_total) if invoice_total is not None else None,
         "overall_conf": float(overall_conf) if overall_conf is not None else None,
         "po_balance_after": float(bal_after) if bal_after is not None else None,

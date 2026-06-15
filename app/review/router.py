@@ -19,8 +19,9 @@ class ReviewActionRequest(BaseModel):
 
 @router.get("/review/queue")
 def review_queue(user: CurrentUser = Depends(get_current_user)):
-    """Flagged runs awaiting a human decision."""
-    items = service.review_queue()
+    """Flagged runs awaiting this role's decision (clerk = first-line flags;
+    manager = escalated items)."""
+    items = service.review_queue(role=user.role)
     return {"queue": items, "count": len(items)}
 
 
