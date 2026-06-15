@@ -93,10 +93,13 @@ def process_invoice(filename: str, data: bytes,
     return _json(r)
 
 
-def get_runs(verdict: str | None = None, limit: int = 100, offset: int = 0) -> dict[str, Any]:
+def get_runs(verdict: str | None = None, settled: bool = False,
+             limit: int = 100, offset: int = 0) -> dict[str, Any]:
     params: dict[str, Any] = {"limit": limit, "offset": offset}
     if verdict:
         params["verdict"] = verdict
+    if settled:
+        params["settled"] = "true"
     r = _send("get",f"{API_BASE_URL}/invoices/runs",
                      headers=_headers(), params=params, timeout=_TIMEOUT)
     return _json(r)
@@ -173,6 +176,13 @@ def put_policy(changes: dict[str, Any]) -> dict[str, Any]:
 def get_audit(invoice_number: str) -> dict[str, Any]:
     r = _send("get",f"{API_BASE_URL}/audit/{invoice_number}",
                      headers=_headers(), timeout=_TIMEOUT)
+    return _json(r)
+
+
+def reset_demo() -> dict[str, Any]:
+    """POST /admin/reset-demo (manager) → re-seed back-dated demo history."""
+    r = _send("post",f"{API_BASE_URL}/admin/reset-demo",
+                      headers=_headers(), timeout=_PROCESS_TIMEOUT)
     return _json(r)
 
 

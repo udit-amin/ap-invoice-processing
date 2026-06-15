@@ -83,12 +83,14 @@ def _make_flagged_run(actor_user_id: str = CLERK) -> str:
 
 
 @requires_db
-def test_flagged_run_appears_in_queue(client, reset_db):
+def test_flagged_run_appears_in_clerk_queue_not_manager(client, reset_db):
+    # A fresh flag is first-line work: it's in the clerk queue, not the manager's
+    # (the manager's queue holds escalated items only).
     run_id = _make_flagged_run()
-    r = client.get("/review/queue", headers=_hdr("manager", MGR))
-    assert r.status_code == 200
-    ids = [item["run_id"] for item in r.json()["queue"]]
-    assert run_id in ids
+    clerk_q = client.get("/review/queue", headers=_hdr("clerk", CLERK)).json()["queue"]
+    mgr_q = client.get("/review/queue", headers=_hdr("manager", MGR)).json()["queue"]
+    assert run_id in [i["run_id"] for i in clerk_q]
+    assert run_id not in [i["run_id"] for i in mgr_q]
 
 
 @requires_db
@@ -123,8 +125,8 @@ def test_approve_draws_po_down_and_leaves_queue(client, reset_db):
         atype, ev_role = cur.fetchone()
     assert atype == "review_approve" and ev_role == "manager"
 
-    # left the queue.
-    q = client.get("/review/queue", headers=_hdr("manager", MGR)).json()["queue"]
+    # left the queue (terminally resolved).
+    q = client.get("/review/queue", headers=_hdr("clerk", CLERK)).json()["queue"]
     assert run_id not in [i["run_id"] for i in q]
 
 
@@ -145,7 +147,7 @@ def test_approve_on_empty_po_is_refused_and_stays_flagged(client, reset_db):
         assert float(cur.fetchone()[0]) == 0.0
         cur.execute("SELECT count(*) FROM review_actions WHERE run_id=%s", (run_id,))
         assert cur.fetchone()[0] == 0
-    q = client.get("/review/queue", headers=_hdr("manager", MGR)).json()["queue"]
+    q = client.get("/review/queue", headers=_hdr("clerk", CLERK)).json()["queue"]
     assert run_id in [i["run_id"] for i in q]
 
 
@@ -168,13 +170,30 @@ def test_reject_is_record_only_and_leaves_queue(client, reset_db):
 
 
 @requires_db
-def test_escalate_keeps_item_in_queue(client, reset_db):
+def test_escalate_routes_to_manager_queue(client, reset_db):
     run_id = _make_flagged_run()
     r = client.post(f"/review/{run_id}/action",
                     headers=_hdr("clerk", CLERK), json={"action": "escalate", "note": "need mgr"})
     assert r.status_code == 200
-    q = client.get("/review/queue", headers=_hdr("manager", MGR)).json()["queue"]
-    assert run_id in [i["run_id"] for i in q]  # escalate is not terminal
+    # Escalate is not terminal — it moves the item from the clerk queue to the manager's.
+    mgr_q = client.get("/review/queue", headers=_hdr("manager", MGR)).json()["queue"]
+    clerk_q = client.get("/review/queue", headers=_hdr("clerk", CLERK)).json()["queue"]
+    assert run_id in [i["run_id"] for i in mgr_q]
+    assert run_id not in [i["run_id"] for i in clerk_q]
+
+
+@requires_db
+def test_review_action_records_actor_email_and_surfaces_in_detail(client, reset_db):
+    run_id = _make_flagged_run()
+    r = client.post(f"/review/{run_id}/action", headers=_hdr("manager", MGR),
+                    json={"action": "reject", "note": "vendor unverified"})
+    assert r.status_code == 200
+    # The reviewer's email + note are stored and returned by review_detail.
+    d = client.get(f"/review/{run_id}", headers=_hdr("manager", MGR)).json()
+    la = d["latest_action"]
+    assert la["action"] == "reject"
+    assert la["actor_email"] == f"{MGR}@x.com"
+    assert la["note"] == "vendor unverified"
 
 
 @requires_db

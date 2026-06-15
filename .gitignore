@@ -17,7 +17,7 @@ venv/
 
 # Generated data (PDFs are regenerated from app/generate/ + scripts/)
 data/inputs/*.pdf
-data/demo_live/*.pdf
+data/demo/**/*.pdf
 
 # Ingest worker landing/archive (runtime PDFs; landing dir kept via .gitkeep)
 data/landing/*.pdf

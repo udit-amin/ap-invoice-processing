@@ -49,5 +49,5 @@ jobs:
 
           if [ "${deployed}" -eq 0 ]; then
             echo "::warning::No Render deploy hooks set for '${GITHUB_REF_NAME}'. Add the"
-            echo "::warning::RENDER_DEPLOY_HOOK_* secrets (see docs/DEPLOYMENT.md) to enable CD."
+            echo "::warning::RENDER_DEPLOY_HOOK_* secrets (see docs/OPERATIONS.md) to enable CD."
           fi
