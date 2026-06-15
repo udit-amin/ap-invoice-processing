@@ -4,14 +4,15 @@ reset (no duplicate clashes) and mapped to the seeded POs.
   data/demo/batch/  — a straight-through batch (no human review):
         3 APPROVE (Stellar/PO-5005, Nimbus/PO-5008, Apex/PO-5007) + 2 REJECT
         (Globex — unapproved vendor; Quanta — closed PO-5003).
-  data/demo/edges/  — invoices to upload one at a time:
-        over-ceiling (TechGear/PO-5009, ₹8.02L > ₹7.5L → FLAG) and a scanned
-        image (GreenLeaf/PO-5006, image-only → runs the vision path; reads cleanly
-        and APPROVEs). Duplicate detection: re-drag any batch file.
+  data/demo/edges/  — the edge cases, uploaded one at a time:
+        over-ceiling   (TechGear/PO-5009, ₹8.02L > ₹7.5L)        → FLAG
+        missing-tax    (FastFreight/PO-5011, no GST)             → FLAG
+        line-variance  (Dell/PO-5001, total matches but lines don't) → FLAG
+        scanned image  (GreenLeaf/PO-5006, image-only)           → APPROVE (vision path)
+        Duplicate detection: re-drag any batch file → REJECT.
 
-The two *starting* flags (line-variance + missing-tax) are seeded separately by
-the reset (app/admin/service.py), so the demo opens with a non-empty queue and the
-batch + edges build the rest up live.
+The demo starts on a clean slate (the reset seeds no runs); the batch and the edge
+uploads build the whole picture up live.
 
     .venv/bin/python scripts/make_demo_invoices.py
 """
@@ -40,6 +41,7 @@ _DEMO_VENDOR_META = {
     "Quanta Networks":            ("29AAAAA0009A1Z7", "Net-30"),
     "Globex Corporation":         ("07GGGGG0006G1Z0", "Net-30"),
     "GreenLeaf Facilities Management": ("29AAAAA0010A1Z6", "Net-15"),
+    "Dell Technologies India Pvt Ltd": ("29AAAAA0001A1Z5", "Net-30"),
 }
 
 
@@ -76,20 +78,31 @@ def batch_specs() -> list[InvoiceSpec]:
 
 
 def edge_specs() -> list[InvoiceSpec]:
-    # over-ceiling: TechGear / PO-5009 → ₹8,02,400 > ₹7,50,000 ceiling.
+    # over-ceiling: TechGear / PO-5009 → ₹8,02,400 > ₹7,50,000 ceiling → FLAG.
     over = _sep("edge_over_ceiling_techgear.pdf", "TechGear Distributors", "TG-2026-0511",
                 "PO-5009", _items(("Laptop (TechGear TG-500)", 10, 65000),
                                   ("Wireless Headphones", 10, 3000)))
-    # scanned image: GreenLeaf / PO-5006, rendered image-only so the vision path
-    # runs. It reads cleanly and matches the PO → APPROVE (shows scan handling).
-    items = _items(("Monthly Housekeeping - May", 1, 65000),
-                   ("Deep Cleaning (one-time)", 1, 18000))
-    sub = sum(i.line_total for i in items)
+    # missing-tax: FastFreight / PO-5011 (stored ex-tax) → only tax_present fails → FLAG.
+    nt = _items(("Inter-state freight (zero-rated)", 1, 200000))
+    notax = InvoiceSpec("edge_missing_tax_fastfreight.pdf", "FastFreight Logistics",
+                        "FF-2026-0614", "2026-06-14", "PO-5011", nt, "none", None,
+                        subtotal=200000.0, tax_amount=None, total=200000.0)
+    # line-variance: Dell / PO-5001 — total matches the PO within tolerance (₹5,66,400)
+    # but the line quantities don't reconcile (4/8 vs the PO's 5/5) → FLAG.
+    lv = _sep("edge_line_variance_dell.pdf", "Dell Technologies India Pvt Ltd",
+              "DELL-2026-0614", "PO-5001",
+              _items(("Latitude 5440 Laptop", 4, 72000),
+                     ('UltraSharp 24" Monitor', 8, 24000)))
+    # scanned image: GreenLeaf / PO-5006, image-only so the vision path runs. Reads
+    # cleanly and matches the PO → APPROVE (shows the system handles scans).
+    sc = _items(("Monthly Housekeeping - May", 1, 65000),
+                ("Deep Cleaning (one-time)", 1, 18000))
+    sub = sum(i.line_total for i in sc)
     tax, tot = _separated(sub)
     scan = InvoiceSpec("edge_scanned_greenleaf.pdf", "GreenLeaf Facilities Management",
-                       "GLF-2026-0440", "2026-06-13", "PO-5006", items, "separated", 18,
+                       "GLF-2026-0440", "2026-06-13", "PO-5006", sc, "separated", 18,
                        sub, tax, tot, scanned=True)
-    return [over, scan]
+    return [over, notax, lv, scan]
 
 
 def main() -> None:
@@ -105,7 +118,8 @@ def main() -> None:
                 pdf = _rasterise_to_image_pdf(pdf)
             (out / spec.filename).write_bytes(pdf)
             print(f"  demo/{sub}/{spec.filename:34s} {spec.invoice_number:14s} {spec.vendor_name}")
-    print("\nBatch = straight-through (3 APPROVE + 2 REJECT); edges = flags to upload one at a time.")
+    print("\nBatch = straight-through (3 APPROVE + 2 REJECT); edges = the cases to walk "
+          "through one at a time (3 FLAG + 1 scanned APPROVE; duplicate = re-drag a batch file).")
 
 
 if __name__ == "__main__":

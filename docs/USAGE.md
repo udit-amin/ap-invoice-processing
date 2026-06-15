@@ -65,26 +65,27 @@ not code — the next invoice respects the change with no redeploy.
 
 ## Demo walkthrough (~5 minutes)
 
-The app opens with **two flagged runs already in the queue**; the demo builds the rest
-up live. Generate the demo invoices first: `python scripts/make_demo_invoices.py`
-(writes `data/demo/batch/` and `data/demo/edges/`).
+The app starts on a **clean slate** — the demo builds everything up live. Generate the
+demo invoices first: `python scripts/make_demo_invoices.py` (writes `data/demo/batch/`
+and `data/demo/edges/`).
 
-1. **Manager → Review queue.** Two items are already waiting — a line-variance
-   (invoice lines don't reconcile to the PO) and a missing-tax invoice. Open each to
-   show the tailored review view.
-2. **Clerk → Batch ingest.** Upload the five files in `data/demo/batch/`. The table comes
+1. **Clerk → Batch ingest.** Upload the five files in `data/demo/batch/`. The table comes
    back **all straight-through**: three APPROVE (within PO and ceiling) and two REJECT
-   (an unapproved vendor and a closed PO). No human needed.
-3. **Clerk → Run view, one at a time, from `data/demo/edges/`:**
-   - the TechGear invoice → **FLAG**: amount exceeds the auto-approve ceiling.
-   - the GreenLeaf invoice is a **scanned image** → it runs the vision path, reads
-     cleanly at high confidence, and **APPROVEs** — showing the system handles scans.
+   (an unapproved vendor and a closed PO). No human needed — that's the volume the team
+   stops touching.
+2. **Clerk → Run view, the edge cases one at a time, from `data/demo/edges/`:**
+   - **TechGear** → **FLAG**: amount exceeds the auto-approve ceiling.
+   - **FastFreight** → **FLAG**: the invoice shows no tax.
+   - **Dell** → **FLAG**: the total matches the PO but the line items don't reconcile
+     (the side-by-side shows the substitution).
+   - **GreenLeaf** is a **scanned image** → it runs the vision path, reads cleanly at high
+     confidence, and **APPROVEs** — showing the system handles scans.
    - re-upload any batch file → **REJECT (duplicate)** — it won't pay the same invoice twice.
-4. **Manager → Dashboard.** The queue and KPIs have filled in; open a run to show the
-   audit trail. Optionally lower the ceiling in **Policy** and re-run a fresh invoice to
-   show the verdict change.
+3. **Manager → Review queue / Dashboard.** The three flags are now in the queue (open one
+   to show the tailored review view); the dashboard KPIs and trend have filled in; open a
+   run for its audit trail. Optionally lower the ceiling in **Policy** and re-run a fresh
+   invoice to show the verdict change.
 
 **Reset between runs:** Manager → Dashboard → **⚠️ Demo controls → Reset demo data**.
-This clears processed runs, restores every PO to its baseline, and re-seeds the two
-starting flags — a clean slate for the next take. (It's gated by `ALLOW_DEMO_RESET`, set
-on the demo deployment only.)
+This clears processed runs and restores every PO to its baseline — a clean slate for the
+next take. (It's gated by `ALLOW_DEMO_RESET`, set on the demo deployment only.)

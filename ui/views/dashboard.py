@@ -171,20 +171,18 @@ def _band_runs() -> None:
 
 def _demo_controls() -> None:
     with st.expander("⚠️ Demo controls"):
-        st.caption("Wipes processed runs and re-seeds ~5 days of back-dated history "
-                   "(6 approve / 3 flag / 2 reject) — a clean slate between demo takes. "
-                   "Reference data (vendors, POs, policy, users) is preserved.")
+        st.caption("Clears all processed runs and restores every PO to its baseline — a "
+                   "clean slate between demo takes. Reference data (vendors, POs, policy, "
+                   "users) is preserved.")
         confirm = st.checkbox("I understand this clears all processed invoices", key="reset_confirm")
         if st.button("🔄 Reset demo data", type="primary", disabled=not confirm):
             try:
-                res = api_client.reset_demo()
+                api_client.reset_demo()
             except api_client.ApiError as exc:
                 st.error(exc.friendly())
                 return
             st.cache_data.clear()  # KPIs/trends/runs are cached — refresh them
-            t = res.get("tally") or {}
-            st.toast(f"Demo data reset — {res.get('runs')} runs "
-                     f"({t.get('APPROVE',0)}✅ {t.get('FLAG',0)}⚠️ {t.get('REJECT',0)}⛔).", icon="🔄")
+            st.toast("Demo data reset — clean slate.", icon="🔄")
             st.rerun()
 
 

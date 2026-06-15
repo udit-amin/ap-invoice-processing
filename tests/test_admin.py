@@ -50,13 +50,26 @@ def test_reset_disabled_without_env(client, monkeypatch):
 
 
 @requires_db
-def test_reset_seeds_two_flagged_runs_when_enabled(client, monkeypatch):
+def test_reset_clears_to_clean_slate_when_enabled(client, monkeypatch):
     monkeypatch.setenv("ALLOW_DEMO_RESET", "true")
+    # Seed a run, then confirm reset wipes operational data back to empty (the demo
+    # starts on a clean slate and builds everything up live).
+    from app.decide import commit, engine
+    from app.decide.policy import Policy
+    from app.governance import recorder
+    pol = Policy(auto_approve_ceiling=750000, min_confidence=0.75, policy_version="t",
+                 severity_overrides={})
+    checks = [{"check": c, "status": "pass", "reason": ""} for c in
+              ("po_lookup", "vendor_approved", "po_status", "total_tolerance",
+               "line_reconciliation", "tax_present", "duplicate")]
+    report = {"invoice_number": "INV-RST", "po_reference": "PO-5001", "matched_po": "PO-5001",
+              "po_balance": 566400, "checks": checks}
+    extr = {"invoice_number": "INV-RST", "vendor_name": "Dell", "po_reference": "PO-5001",
+            "total": 566400, "extraction_confidence": {"overall": 0.95}}
+    rid = recorder.start_run(invoice_number="INV-RST", vendor_name="Dell")
+    commit.commit_decision(engine.decide(report, extr, pol), "PO-5001", 566400, rid)
+
     body = client.post("/admin/reset-demo", headers=_hdr("manager", MGR)).json()
-    # The demo starts with exactly two flagged runs awaiting review; the batch +
-    # edge uploads build the rest up live.
-    assert body["runs"] == 2
-    assert body["tally"] == {"FLAG": 2}
+    assert body == {"runs": 0, "tally": {}}
     summary = client.get("/dashboard/summary", headers=_hdr("manager", MGR)).json()
-    assert summary["total_runs"] == 2
-    assert summary["needs_review"] == 2
+    assert summary["total_runs"] == 0

@@ -14,14 +14,14 @@ each PR adds an entry.
   parity. The worker now sweeps `landing` recursively so a date-partitioned
   `landing/<YYYYMMDD>/` works, mirroring the archive partition.
 - **"Reset demo data" button** (manager, Dashboard → Demo controls) backed by
-  `POST /admin/reset-demo` (`app/admin/`) — truncates operational data, restores POs, and
-  re-seeds the demo's starting state. **Gated by `ALLOW_DEMO_RESET`** (on for the demo
-  Render services, off in real prod) and manager-only. `scripts/seed_demo_history.py` is a
-  thin wrapper over the shared `app.admin.service.reset_demo_data`. New `tests/test_admin.py`.
+  `POST /admin/reset-demo` (`app/admin/`) — clears all processed runs and restores POs to
+  baseline (a clean slate). **Gated by `ALLOW_DEMO_RESET`** (on for the demo Render
+  services, off in real prod) and manager-only. `scripts/seed_demo_history.py` is a thin
+  wrapper over the shared `app.admin.service.reset_demo_data`. New `tests/test_admin.py`.
 - **Curated demo data** — `scripts/make_demo_invoices.py` emits a straight-through
-  `data/demo/batch/` (3 APPROVE + 2 REJECT) and `data/demo/edges/` (over-ceiling +
-  missing-tax FLAGs); the reset seeds **two starting flagged runs**, so the demo opens with
-  a non-empty queue and builds up live.
+  `data/demo/batch/` (3 APPROVE + 2 REJECT) and `data/demo/edges/` (the edge cases to walk
+  through one at a time: over-ceiling, missing-tax, line-variance → FLAG; a scanned invoice
+  → APPROVE via the vision path). The demo starts on a clean slate and builds up live.
 
 ### Changed
 - **Docs trimmed to four** (`docs/`): Operations (now also covers deploy + CI/CD),

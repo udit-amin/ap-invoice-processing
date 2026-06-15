@@ -192,17 +192,15 @@ queue, the **Processed** view, and the dashboard. It needs `DATABASE_URL` +
 
 ## 8. Demo data
 
-The demo opens with **two flagged runs** already in the review queue; the batch and
-edge uploads build the rest up live. The full clerk/manager walkthrough is in
-[USAGE.md](USAGE.md). Operationally:
+The demo starts on a **clean slate** and builds everything up live. The full
+clerk/manager walkthrough is in [USAGE.md](USAGE.md). Operationally:
 
 1. Generate the demo invoices: `python scripts/make_demo_invoices.py` → writes
-   `data/demo/batch/` (3 APPROVE + 2 REJECT) and `data/demo/edges/` (over-ceiling FLAG
-   + a scanned invoice that runs the vision path and approves).
-2. Reset to the starting state any time: **Dashboard → Demo controls → Reset demo
-   data** (or `python scripts/seed_demo_history.py`). This restores POs and re-seeds
-   the two starting flags (line-variance + missing-tax), so the batch + edge uploads
-   are repeatable.
+   `data/demo/batch/` (3 APPROVE + 2 REJECT) and `data/demo/edges/` (over-ceiling,
+   missing-tax, line-variance → FLAG; a scanned invoice → APPROVE via the vision path).
+2. Reset to a clean slate any time: **Dashboard → Demo controls → Reset demo data**
+   (or `python scripts/seed_demo_history.py`). This clears processed runs and restores
+   POs to baseline, so the batch + edge uploads are repeatable.
 
 > Re-uploading an already-seen invoice returns **REJECT (duplicate)** by design —
 > reset (above) for a clean run, or use it deliberately to show the duplicate guard.
